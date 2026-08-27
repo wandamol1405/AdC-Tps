@@ -29,6 +29,7 @@ always @(*) begin
         SRA: o_result = $signed(i_a) >>> i_b; // desplaza siempre a, desplaza b veces
         SRL: o_result = i_a >> i_b;
         NOR: o_result = ~(i_a | i_b);
+        default: o_result = {NB_DATA{1'b0}};
     endcase
 end
 
