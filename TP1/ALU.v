@@ -26,8 +26,8 @@ always @(*) begin
         AND: o_result = i_a & i_b;
         OR: o_result = i_a | i_b;
         XOR: o_result = i_a ^ i_b;
-        SRA: o_result = i_a >> i_b // desplaza siempre a, desplaza b veces
-        SRL: o_result = i_a >>> i_b;
+        SRA: o_result = $signed(i_a) >>> i_b; // desplaza siempre a, desplaza b veces
+        SRL: o_result = i_a >> i_b;
         NOR: o_result = ~(i_a | i_b);
     endcase
 end
