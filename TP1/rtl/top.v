@@ -1,12 +1,14 @@
 module top #(
     parameter NB_DATA = 8, // Number of bits for the data inputs
     parameter NB_OP = 6, // Number of bits for the operation code
-    parameter NB_SW = 16,
-    parameter NB_INPUTS = 3,
+    parameter NB_SW = 8,
+    parameter NB_INPUTS = 3
 ) (
-    input wire [NB_SW-1:0] i_sw, // switches donde ingresan los datos y opcode 
-    input wire [NB_INPUTS-1:0] i_enb, // habilita 1, 2 y 3
-    output wire [NB_DATA-1:0] o_leds 
+    input wire [NB_SW-1:0] sw, // switches donde ingresan los datos y opcode 
+    input wire btnL, //btn de control A
+    input wire btnC, // btn de control B
+    input wire btnR, // btn de control Op
+    output wire [NB_DATA-1:0] led 
 );
 
 /*
