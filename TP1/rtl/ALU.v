@@ -5,6 +5,7 @@ module ALU #(
     input wire signed [NB_DATA-1:0] i_a,
     input wire signed [NB_DATA-1:0] i_b,
     input wire [NB_OP-1:0] i_op,
+    input wire i_enable,
     output reg [NB_DATA-1:0] o_result
 );
 
@@ -20,6 +21,7 @@ localparam [NB_OP-1:0] NOR = {6'b100111};
 localparam SHIFT = i_b;
 
 always @(*) begin
+    if (i_enable) begin
     case (i_op)
         ADD: o_result = i_a + i_b;
         SUB: o_result = i_a - i_b; // minuendo siempre a, sustraendo siempre b
@@ -31,6 +33,9 @@ always @(*) begin
         NOR: o_result = ~(i_a | i_b);
         default: o_result = {NB_DATA{1'b0}};
     endcase
+    end else begin
+        o_result = {NB_DATA{1'b0}};
+    end
 end
 
 endmodule
