@@ -1,5 +1,5 @@
 module reg_bank #(
-    parameter WIDTH
+    parameter WIDTH = 8 // Number of bits for the register
 ) (
     input wire clk,
     input wire reset,

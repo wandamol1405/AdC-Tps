@@ -5,20 +5,23 @@ module top #(
     parameter NB_INPUTS = 3,
     parameter N_DEBOUNCE = 20
 ) (
-    input wire [NB_SW-1:0] sw, // switches donde ingresan los datos y opcode 
+    input wire clk,
+    input wire reset,
+    input wire [NB_SW-1:0] sw, // switches donde ingresan los datos y opcode
     input wire btnL, //btn de control A
     input wire btnC, // btn de control B
     input wire btnR, // btn de control Op
-    output wire [NB_DATA-1:0] led 
+    output wire [NB_DATA-1:0] led
 );
 
 wire alu_enable;
-reg [NB_DATA-1:0] reg_a_out, reg_b_out, reg_op_out;
+wire [NB_DATA-1:0] reg_a_out, reg_b_out;
+wire [NB_OP-1:0] reg_op_out;
 wire enb_reg_A, enb_reg_B, enb_reg_OP;
 
 load_ctrl #(
     .N_DEBOUNCE(20) // Number of bits for the debounce counter
-) (
+) u_load_ctrl (
     .i_a(btnL),
     .i_b(btnC),
     .i_OP(btnR),

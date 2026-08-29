@@ -18,8 +18,6 @@ localparam [NB_OP-1:0] SRA = {6'b000011};
 localparam [NB_OP-1:0] SRL = {6'b000010};
 localparam [NB_OP-1:0] NOR = {6'b100111};
 
-localparam SHIFT = i_b;
-
 always @(*) begin
     if (i_enable) begin
     case (i_op)
