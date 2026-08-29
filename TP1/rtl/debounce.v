@@ -2,7 +2,15 @@
 // Filtra los rebotes mecánicos de un pulsador y entrega tanto el nivel
 // ya estabilizado (db_level) como un pulso de 1 ciclo al detectar
 // una pulsación válida (db_tick).
-module debounce (
+module debounce #(
+    // N define cuántos ciclos de clock hay que ver la entrada estable
+    // antes de aceptar el cambio de nivel como real (y no un rebote).
+    // Con clk = 100 MHz, N = 21 equivale a 2^21 ciclos ≈ 21 ms de espera,
+    // tiempo típico mayor al rebote mecánico de los pulsadores de la Basys3.
+    // Es un parameter (no localparam) para poder ajustarlo por instancia,
+    // como hace load_ctrl.v vía N_DEBOUNCE.
+    parameter N = 21
+) (
     input  wire clk,       // Reloj principal
     input  wire reset,     // Reset sincrónico
     input  wire sw,        // Entrada del botón con rebotes
@@ -17,12 +25,6 @@ module debounce (
         wait1 = 2'b01,
         one   = 2'b10,
         wait0 = 2'b11;
-
-    // N define cuántos ciclos de clock hay que ver la entrada estable
-    // antes de aceptar el cambio de nivel como real (y no un rebote).
-    // Con clk = 100 MHz, N = 21 equivale a 2^21 ciclos ≈ 21 ms de espera,
-    // tiempo típico mayor al rebote mecánico de los pulsadores de la Basys3.
-    localparam N = 21;
 
     reg [1:0]   state_reg, state_next;
     reg [N-1:0] q_reg, q_next;

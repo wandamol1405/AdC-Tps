@@ -1,10 +1,11 @@
 module load_ctrl #(
-    parameter N_DEBOUNCE = 20, // Number of bits for the debounce counter
+    parameter N_DEBOUNCE = 20 // Number of bits for the debounce counter
 ) (
     input wire i_a,
     input wire i_b,
     input wire i_OP,
     input wire clk,
+    input wire reset,
     output wire o_enable
 );
 
@@ -16,27 +17,26 @@ wire tick_a, tick_b, tick_op;
 //la salida de cada antirrebote a la entrada de la maquina de estados.
 //esto todo el tiempo esta viendo si hay un flanco en cada boton de control, y si lo hay, 
 //lo manda a la maquina de estados para que cambie de estado.
-debounce_edge #(.N(N_DEBAUNCE)) db_a (
+debounce #(.N(N_DEBOUNCE)) db_a (
     .clk(clk),          // Clock input
     .reset(reset),      // Reset input
-    .sw_btn(i_a),       // entrada del boton de control A (que puede generar un rebote)
-    .btn_tick(tick_a)   // salida del antirrebote, que tiene el que va 
-
-    // Lo que yo entiendo es que agarra el pin del clk del antirrebote y lo conecta al
-    // clk de la placa que entiendo que seria el top.
-)
-debounce_edge #(.N(N_DEBOUNCE)) db_b (
-    .clk(clk),
-    .reset(reset),
-    .sw_btn(i_b),
-    .btn_tick(tick_b)
+    .sw(i_a),           // entrada del boton de control A (que puede generar un rebote)
+    .db_tick(tick_a)    // pulso de 1 ciclo cuando el flanco ya fue confirmado
+    // db_level sin conectar: acá solo necesitamos el pulso, no el nivel filtrado
 );
 
-debounce_edge #(.N(N_DEBOUNCE)) db_op (
+debounce #(.N(N_DEBOUNCE)) db_b (
     .clk(clk),
     .reset(reset),
-    .sw_btn(i_OP),
-    .btn_tick(tick_op)
+    .sw(i_b),
+    .db_tick(tick_b)
+);
+
+debounce #(.N(N_DEBOUNCE)) db_op (
+    .clk(clk),
+    .reset(reset),
+    .sw(i_OP),
+    .db_tick(tick_op)
 );
 
 
