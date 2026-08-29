@@ -6,7 +6,10 @@ module load_ctrl #(
     input wire i_OP,
     input wire clk,
     input wire reset,
-    output wire o_enable
+    output reg o_enb_reg_A,
+    output reg o_enb_reg_B,
+    output reg o_enb_reg_OP,
+    output reg o_enable_alu
 );
 
 // me hace falta un cable que lleve la señal de los antirrebote hacia las entradas de
@@ -51,7 +54,7 @@ localparam [1:0]
 reg [1:0] state_reg, state_next;
 
 //como seria lo de los flancos
-always @(posedge clk or posedge reset) begin
+always @(posedge clk) begin
     if (reset) begin
         state_reg <= WAIT_A; // si hay reset, vuelvo al estado de espera para A
     end else begin
@@ -64,26 +67,36 @@ end
 always @(*) begin
     state_next = state_reg; // por default, el siguiente estado es el mismo que el actual
     //si todo sale bien, cuando llegue al enable, me quedo ahi hasta que haya un reset, y vuelvo al estado de espera para A
+    
+    // por default, no habilito ninguna salida
+    o_enb_reg_A  = 1'b0;
+    o_enb_reg_B  = 1'b0;
+    o_enb_reg_OP = 1'b0;
+    o_enable_alu = 1'b0;
 
     //veo en que estado estoy y que hago
     case (state_reg)                        // dependiendo del estado en el que estoy, hago algo distinto       
         WAIT_A: begin                       // si estoy en el estado de espera para A, espero a que haya un flanco en A
             if (tick_a) begin               // si hay un flanco en A, paso al estado de espera para B
                 state_next = WAIT_B;        // si no hay flanco en A, me quedo en el estado de espera para A
+                o_enb_reg_A = 1'b1;
             end
         end
         WAIT_B: begin
             if (tick_b) begin // si hay un flanco en B, paso al estado de espera para OP
                 state_next = WAIT_OP;
+                o_enb_reg_B = 1'b1;
             end
         end
         WAIT_OP: begin
             if (tick_op) begin // si hay un flanco en OP, paso al estado de habilitación
                 state_next = ENABLE;
+                o_enb_reg_OP = 1'b1;
             end
         end
         ENABLE: begin
             // en el estado de habilitación, no hago nada, me quedo en este estado hasta que haya un reset
+            o_enable_alu = 1'b1; // habilito la salida de la ALU
         end
     endcase
 
