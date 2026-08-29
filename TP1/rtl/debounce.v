@@ -1,3 +1,7 @@
+// FSM antirrebote (tipo Moore) con detector de flanco integrado.
+// Filtra los rebotes mecánicos de un pulsador y entrega tanto el nivel
+// ya estabilizado (db_level) como un pulso de 1 ciclo al detectar
+// una pulsación válida (db_tick).
 module debounce (
     input  wire clk,       // Reloj principal
     input  wire reset,     // Reset sincrónico
@@ -6,12 +10,18 @@ module debounce (
     output reg  db_tick    // Pulso de 1 ciclo al presionar
 );
 
-    localparam [1:0] 
+    // Estados: zero/one = niveles estables (sin rebote); wait1/wait0 son
+    // estados de "espera confirmando" mientras corre el contador de N bits.
+    localparam [1:0]
         zero  = 2'b00,
         wait1 = 2'b01,
         one   = 2'b10,
         wait0 = 2'b11;
 
+    // N define cuántos ciclos de clock hay que ver la entrada estable
+    // antes de aceptar el cambio de nivel como real (y no un rebote).
+    // Con clk = 100 MHz, N = 21 equivale a 2^21 ciclos ≈ 21 ms de espera,
+    // tiempo típico mayor al rebote mecánico de los pulsadores de la Basys3.
     localparam N = 21;
 
     reg [1:0]   state_reg, state_next;
@@ -35,6 +45,8 @@ module debounce (
         db_tick    = 1'b0;
 
         case (state_reg)
+            // Reposo: entrada estable en 0. Ante el primer 1 se arranca
+            // el conteo (q_next se carga en todo unos) para confirmarlo.
             zero: begin
                 db_level = 1'b0;
                 if (sw) begin
@@ -43,6 +55,10 @@ module debounce (
                 end
             end
 
+            // Confirmando el 1: mientras sw se mantenga en 1, el contador
+            // decrementa. Si vuelve a 0 antes de llegar a cero, fue rebote
+            // y se cancela volviendo a "zero". Si el contador llega a 0,
+            // el nivel alto se da por real y se emite el pulso db_tick.
             wait1: begin
                 db_level = 1'b0;
                 if (sw) begin
@@ -56,6 +72,8 @@ module debounce (
                 end
             end
 
+            // Nivel alto ya confirmado y estable. Ante el primer 0 se
+            // arranca el mismo conteo pero para confirmar la liberación.
             one: begin
                 db_level = 1'b1;
                 if (~sw) begin
@@ -64,6 +82,8 @@ module debounce (
                 end
             end
 
+            // Confirmando el 0: misma lógica que wait1 pero en sentido
+            // inverso (sin generar db_tick, que solo marca flanco de subida).
             wait0: begin
                 db_level = 1'b1;
                 if (~sw) begin
