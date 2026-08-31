@@ -29,3 +29,10 @@ set_property -dict { PACKAGE_PIN W18 IOSTANDARD LVCMOS33 } [get_ports { led[4] }
 set_property -dict { PACKAGE_PIN U15 IOSTANDARD LVCMOS33 } [get_ports { led[5] }];
 set_property -dict { PACKAGE_PIN U14 IOSTANDARD LVCMOS33 } [get_ports { led[6] }];
 set_property -dict { PACKAGE_PIN V14 IOSTANDARD LVCMOS33 } [get_ports { led[7] }];
+
+## LD8: apagado a proposito, separa el resultado de las banderas
+set_property -dict { PACKAGE_PIN V13 IOSTANDARD LVCMOS33 } [get_ports { led[8] }];
+## LD9: overflow con signo (ADD saturado)
+set_property -dict { PACKAGE_PIN V3 IOSTANDARD LVCMOS33 } [get_ports { led[9] }];
+## LD10: carry de salida sin signo (ADD)
+set_property -dict { PACKAGE_PIN W3 IOSTANDARD LVCMOS33 } [get_ports { led[10] }];
