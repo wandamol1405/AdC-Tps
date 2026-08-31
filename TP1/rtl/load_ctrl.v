@@ -80,6 +80,7 @@ always @(*) begin
             if (tick_a) begin               // si hay un flanco en A, paso al estado de espera para B
                 state_next = WAIT_B;        // si no hay flanco en A, me quedo en el estado de espera para A
                 o_enb_reg_A = 1'b1;
+                o_enable_alu = 1'b0; // deshabilito la salida de la ALU
             end
         end
         WAIT_B: begin
