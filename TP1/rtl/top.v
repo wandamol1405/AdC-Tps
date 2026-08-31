@@ -23,7 +23,7 @@ wire [NB_OP-1:0] reg_op_out;
 wire enb_reg_A, enb_reg_B, enb_reg_OP;
 
 load_ctrl #(
-    .N_DEBOUNCE(20) // Number of bits for the debounce counter
+    .N_DEBOUNCE(N_DEBOUNCE) // Number of bits for the debounce counter
 ) u_load_ctrl (
     .i_a(btnL),
     .i_b(btnC),
