@@ -13,9 +13,10 @@ module tb_top;
     localparam N_DEBOUNCE_SIM = 4; // 2^4-1 = 15 ciclos de estabilidad para confirmar un flanco
     localparam NB_LED  = NB_DATA + 3; // resultado + 1 led apagado (separador) + overflow + carry
 
-    localparam BTN_A  = 0; // btnL
-    localparam BTN_B  = 1; // btnC
-    localparam BTN_OP = 2; // btnR
+    localparam BTN_A     = 0; // btnL
+    localparam BTN_B     = 1; // btnC
+    localparam BTN_OP    = 2; // btnR
+    localparam BTN_CLEAN = 3; // btnU
 
     // Opcodes (deben coincidir con los definidos en ALU.v)
     localparam [NB_OP-1:0] ADD    = 6'b100000;
@@ -27,7 +28,7 @@ module tb_top;
     reg                 clk;
     reg                 reset;
     reg  [NB_SW-1:0]    sw;
-    reg                 btnL, btnC, btnR;
+    reg                 btnL, btnC, btnR, btnU;
     wire [NB_LED-1:0]   led;
 
     integer casos, errores;
@@ -45,6 +46,7 @@ module tb_top;
         .btnL(btnL),
         .btnC(btnC),
         .btnR(btnR),
+        .btnU(btnU),
         .led(led)
     );
 
@@ -85,7 +87,7 @@ module tb_top;
     task do_reset;
         begin
             reset = 1'b1;
-            btnL = 1'b0; btnC = 1'b0; btnR = 1'b0; sw = {NB_SW{1'b0}};
+            btnL = 1'b0; btnC = 1'b0; btnR = 1'b0; btnU = 1'b0; sw = {NB_SW{1'b0}};
             repeat (3) @(posedge clk);
             reset = 1'b0;
             @(posedge clk);
@@ -100,13 +102,14 @@ module tb_top;
     // verdad durante la espera; por eso se referencian los regs del testbench
     // directamente a traves de este selector.
     task set_btn;
-        input integer which; // 0=A(btnL), 1=B(btnC), 2=OP(btnR)
+        input integer which; // 0=A(btnL), 1=B(btnC), 2=OP(btnR), 3=CLEAN(btnU)
         input value;
         begin
             case (which)
                 0: btnL = value;
                 1: btnC = value;
                 2: btnR = value;
+                3: btnU = value;
             endcase
         end
     endtask
@@ -269,6 +272,57 @@ module tb_top;
             errores = errores + 1;
             $display("[FALLO] MIDSEQ   tras reset, estado=%s led=%b (esperado WAIT_A y led=0)",
                 state_name(dut.u_load_ctrl.state_reg), led);
+        end
+
+        // ---------------- "clean" (btnU): vuelve a WAIT_A sin borrar A/B/OP ----------------
+        $display("--------------------------------------------------------");
+        $display(" Probando el boton de limpieza (clean): no debe borrar A/B/OP ya cargados");
+        do_reset;
+        sw = 8'sd15;
+        press_clean(BTN_A, 25);
+        sw = 8'sd5;
+        press_clean(BTN_B, 25);
+        sw = ADD;
+        press_clean(BTN_OP, 25);
+        @(posedge clk);
+        casos = casos + 1;
+        if (dut.u_load_ctrl.state_reg == 2'b11 && led[NB_DATA-1:0] === 8'd20) begin
+            $display("[OK]    CLEAN-PRE  15+5=%0d cargado y habilitado antes de limpiar", led[NB_DATA-1:0]);
+        end else begin
+            errores = errores + 1;
+            $display("[FALLO] CLEAN-PRE  estado=%s result=0x%0h (esperado ENABLE, 20)",
+                state_name(dut.u_load_ctrl.state_reg), led[NB_DATA-1:0]);
+        end
+
+        // Presiono "clean" (btnU) sin pasar por reset
+        press_clean(BTN_CLEAN, 25);
+        casos = casos + 1;
+        if (dut.u_load_ctrl.state_reg == 2'b00 && led == {NB_LED{1'b0}} &&
+            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5 && dut.reg_op_out === ADD) begin
+            $display("[OK]    CLEAN    vuelve a WAIT_A, led=0, pero A=%0d B=%0d OP=%b siguen intactos",
+                dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
+        end else begin
+            errores = errores + 1;
+            $display("[FALLO] CLEAN    estado=%s led=%b A=%0d B=%0d OP=%b (esperado WAIT_A, led=0, A=15 B=5 OP=ADD intactos)",
+                state_name(dut.u_load_ctrl.state_reg), led, dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
+        end
+
+        // Nueva operacion reutilizando los mismos A y B (solo cambio OP a SUB).
+        // La FSM igual exige volver a confirmar cada etapa; lo que "clean" evita
+        // es que reg_bank haya perdido los valores viejos mientras tanto.
+        sw = 8'sd15;
+        press_clean(BTN_A, 25);
+        sw = 8'sd5;
+        press_clean(BTN_B, 25);
+        sw = SUB;
+        press_clean(BTN_OP, 25);
+        @(posedge clk);
+        casos = casos + 1;
+        if (led[NB_DATA-1:0] === 8'd10) begin // 15-5=10
+            $display("[OK]    CLEAN-POST tras clean, nueva operacion SUB reutilizando A/B: 15-5=%0d", led[NB_DATA-1:0]);
+        end else begin
+            errores = errores + 1;
+            $display("[FALLO] CLEAN-POST resultado=0x%0h (esperado 10)", led[NB_DATA-1:0]);
         end
 
         $display("========================================================");

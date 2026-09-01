@@ -4,6 +4,7 @@ module load_ctrl #(
     input wire i_a,
     input wire i_b,
     input wire i_OP,
+    input wire i_clean, // vuelve a WAIT_A y apaga la ALU sin tocar lo cargado en los registros
     input wire clk,
     input wire reset,
     output reg o_enb_reg_A,
@@ -14,7 +15,7 @@ module load_ctrl #(
 
 // me hace falta un cable que lleve la señal de los antirrebote hacia las entradas de
 
-wire tick_a, tick_b, tick_op;
+wire tick_a, tick_b, tick_op, tick_clean;
 
 //Tengo que instanciar los antirrebotes para cada boton de control, y luego conectar
 //la salida de cada antirrebote a la entrada de la maquina de estados.
@@ -42,6 +43,13 @@ debounce #(.N(N_DEBOUNCE)) db_op (
     .db_tick(tick_op)
 );
 
+debounce #(.N(N_DEBOUNCE)) db_clean (
+    .clk(clk),
+    .reset(reset),
+    .sw(i_clean),
+    .db_tick(tick_clean)
+);
+
 
 //voy con los estados
 localparam [1:0] 
@@ -57,6 +65,9 @@ reg [1:0] state_reg, state_next;
 always @(posedge clk) begin
     if (reset) begin
         state_reg <= WAIT_A; // si hay reset, vuelvo al estado de espera para A
+    end else if (tick_clean) begin
+        state_reg <= WAIT_A; // "clean": vuelvo a WAIT_A (y por lo tanto se apaga o_enable_alu)
+                              // sin resetear los reg_bank, que conservan A/B/OP
     end else begin
         state_reg <= state_next; // si no hay reset, paso al siguiente estado
     end

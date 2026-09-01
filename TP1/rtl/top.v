@@ -12,6 +12,7 @@ module top #(
     input wire btnL, //btn de control A
     input wire btnC, // btn de control B
     input wire btnR, // btn de control Op
+    input wire btnU, // btn de limpieza: vuelve a WAIT_A sin borrar los registros
     output wire [NB_LED-1:0] led
 );
 
@@ -28,6 +29,7 @@ load_ctrl #(
     .i_a(btnL),
     .i_b(btnC),
     .i_OP(btnR),
+    .i_clean(btnU),
     .clk(clk),
     .reset(reset),
     .o_enb_reg_A(enb_reg_A),

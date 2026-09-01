@@ -2,7 +2,7 @@
 set_property -dict { PACKAGE_PIN W5 IOSTANDARD LVCMOS33 } [get_ports { clk }];
 create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk }];
 
-## Reset (SW15)
+## Reset (btnD - el pin U17 es btnD segun Basys3_Master.xdc, no sw[15] como decia este comentario)
 set_property -dict { PACKAGE_PIN U17 IOSTANDARD LVCMOS33 } [get_ports { reset }];
 
 ## Switches SW0-SW7: datos/opcode para A, B y Op
@@ -19,6 +19,8 @@ set_property -dict { PACKAGE_PIN W13 IOSTANDARD LVCMOS33 } [get_ports { sw[7] }]
 set_property -dict { PACKAGE_PIN W19 IOSTANDARD LVCMOS33 } [get_ports { btnL }];
 set_property -dict { PACKAGE_PIN U18 IOSTANDARD LVCMOS33 } [get_ports { btnC }];
 set_property -dict { PACKAGE_PIN T17 IOSTANDARD LVCMOS33 } [get_ports { btnR }];
+## btnU = clean (vuelve a WAIT_A y apaga la ALU sin borrar A/B/Op ya cargados)
+set_property -dict { PACKAGE_PIN T18 IOSTANDARD LVCMOS33 } [get_ports { btnU }];
 
 ## LEDs LD0-LD7: resultado de la ALU
 set_property -dict { PACKAGE_PIN U16 IOSTANDARD LVCMOS33 } [get_ports { led[0] }];
