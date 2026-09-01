@@ -11,6 +11,8 @@ module tb_top;
     localparam NB_OP   = 6;
     localparam NB_SW   = 8;
     localparam N_DEBOUNCE_SIM = 4; // 2^4-1 = 15 ciclos de estabilidad para confirmar un flanco
+    // Debe coincidir con el empaquetado real de top.v: led[NB_DATA-1:0]=resultado,
+    // led[NB_DATA]=separador apagado, led[NB_DATA+1]=overflow, led[NB_DATA+2]=carry.
     localparam NB_LED  = NB_DATA + 3; // resultado + 1 led apagado (separador) + overflow + carry
 
     localparam BTN_A     = 0; // btnL
@@ -31,8 +33,8 @@ module tb_top;
     reg                 btnL, btnC, btnR, btnU;
     wire [NB_LED-1:0]   led;
 
-    integer casos, errores;
-    integer tick_a_count, tick_b_count, tick_op_count;
+    integer casos, errores; // contadores del resumen final autochequeado
+    integer tick_a_count, tick_b_count, tick_op_count; // cuántos tick_* confirmó cada antirrebote
 
     top #(
         .NB_DATA(NB_DATA),

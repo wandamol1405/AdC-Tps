@@ -1,5 +1,9 @@
 `timescale 1ns / 1ps
 
+// Testbench autochequeable de la ALU: aplica un estímulo por cada operación
+// (incluyendo casos borde de overflow/carry en ADD, i_enable en 0 y un
+// opcode inválido) y compara automáticamente la salida contra el valor
+// esperado, sin intervención manual — solo hay que leer el resumen final.
 module tb_ALU;
 
     localparam NB_DATA = 8;
@@ -24,8 +28,8 @@ module tb_ALU;
     wire                      o_overflow;
     wire                      o_carry;
 
-    integer errores;
-    integer casos;
+    integer errores; // cantidad de check_op que fallaron
+    integer casos;   // cantidad total de check_op ejecutados
 
     ALU #(
         .NB_DATA(NB_DATA),
@@ -40,7 +44,9 @@ module tb_ALU;
         .o_carry(o_carry)
     );
 
-    // Tarea que aplica un estimulo, espera y compara contra los valores esperados
+    // Tarea que aplica un estimulo, espera y compara contra los valores esperados.
+    // Al ser combinacional el DUT, alcanza con un pequeño delay (#10) para que
+    // se propague la lógica antes de muestrear las salidas; no hace falta clock.
     task check_op;
         input [127:0] nombre_op; // nombre para mostrar por consola
         input signed [NB_DATA-1:0] a;
@@ -57,6 +63,8 @@ module tb_ALU;
             i_enable = en;
             #10;
             casos = casos + 1;
+            // !== (comparación estricta) en vez de != para detectar también
+            // discrepancias con bits en X/Z, no solo diferencias de valor.
             if (o_result !== esperado || o_overflow !== esperado_overflow || o_carry !== esperado_carry) begin
                 errores = errores + 1;
                 $display("[FALLO] %-8s a=%0d b=%0d en=%0d op=%b -> o_result=%0d (0x%0h) ov=%b ca=%b | esperado=%0d (0x%0h) ov=%b ca=%b",

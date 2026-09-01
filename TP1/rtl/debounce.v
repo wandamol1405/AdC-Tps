@@ -26,8 +26,8 @@ module debounce #(
         one   = 2'b10,
         wait0 = 2'b11;
 
-    reg [1:0]   state_reg, state_next;
-    reg [N-1:0] q_reg, q_next;
+    reg [1:0]   state_reg, state_next; // estado actual / próximo estado de la FSM
+    reg [N-1:0] q_reg, q_next;         // contador regresivo de confirmación (registro / próximo valor)
 
     // Memoria de estados y contador con RESET SINCRÓNICO
     always @(posedge clk) begin
