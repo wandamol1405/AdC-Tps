@@ -38,7 +38,7 @@ Definido en `constraints/constraints.xdc`:
 | Señal | Función | Pines Basys3 |
 |---|---|---|
 | `clk` | Clock de 100 MHz | W5 |
-| `reset` | Reset síncrono | SW15 |
+| `reset` | Reset síncrono | btnD (U17) |
 | `sw[7:0]` | Dato (A/B) u opcode (SW5-SW0) | SW7-SW0 |
 | `btnL` | Cargar A | Botón izquierdo |
 | `btnC` | Cargar B | Botón central |
