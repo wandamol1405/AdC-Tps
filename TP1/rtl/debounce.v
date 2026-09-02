@@ -41,11 +41,11 @@ module debounce #(
     end
 
     // Lógica combinacional de estado y salida
-    always @(*) begin
+always @(*) begin
         state_next = state_reg;
         q_next     = q_reg;
+        db_level   = 1'b0;
         db_tick    = 1'b0;
-
         case (state_reg)
             // Reposo: entrada estable en 0. Ante el primer 1 se arranca
             // el conteo (q_next se carga en todo unos) para confirmarlo.
