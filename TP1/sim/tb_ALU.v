@@ -4,6 +4,10 @@
 // (incluyendo casos borde de overflow/carry en ADD, i_enable en 0 y un
 // opcode inválido) y compara automáticamente la salida contra el valor
 // esperado, sin intervención manual — solo hay que leer el resumen final.
+// Además de los casos dirigidos, corre un bloque de entradas aleatorias
+// (a, b, op e i_enable con $random) autochequeadas contra un modelo de
+// referencia que reproduce la especificación de la ALU de forma independiente
+// del RTL (ver task ref_model), tal como pide el enunciado del TP.
 module tb_ALU;
 
     localparam NB_DATA = 8;
@@ -20,6 +24,8 @@ module tb_ALU;
     localparam [NB_OP-1:0] NOR = 6'b100111;
     localparam [NB_OP-1:0] INVALID_OP = 6'b111111;
 
+    localparam NUM_RANDOM = 300; // cantidad de estimulos aleatorios a correr
+
     reg  signed [NB_DATA-1:0] i_a;
     reg  signed [NB_DATA-1:0] i_b;
     reg  [NB_OP-1:0]          i_op;
@@ -30,6 +36,11 @@ module tb_ALU;
 
     integer errores; // cantidad de check_op que fallaron
     integer casos;   // cantidad total de check_op ejecutados
+
+    integer rnd_i;
+    reg [NB_OP-1:0] rnd_op;
+    reg [NB_DATA-1:0] rnd_exp;
+    reg rnd_exp_ov, rnd_exp_ca;
 
     ALU #(
         .NB_DATA(NB_DATA),
@@ -73,6 +84,51 @@ module tb_ALU;
             end else begin
                 $display("[OK]    %-8s a=%0d b=%0d en=%0d op=%b -> o_result=%0d (0x%0h) ov=%b ca=%b",
                     nombre_op, a, b, en, op, o_result, o_result, o_overflow, o_carry);
+            end
+        end
+    endtask
+
+    // Modelo de referencia: recalcula la especificacion de la ALU (misma
+    // logica de overflow/carry/saturacion en ADD que el enunciado define)
+    // para poder autochequear entradas generadas con $random, sin depender
+    // de valores esperados escritos a mano caso por caso.
+    task ref_model;
+        input signed [NB_DATA-1:0] a;
+        input signed [NB_DATA-1:0] b;
+        input [NB_OP-1:0] op;
+        input en;
+        output [NB_DATA-1:0] exp_result;
+        output exp_overflow;
+        output exp_carry;
+        reg [NB_DATA:0]   full;
+        reg [NB_DATA-1:0] wrapped;
+        reg               ovf;
+        begin
+            exp_overflow = 1'b0;
+            exp_carry    = 1'b0;
+            if (!en) begin
+                exp_result = {NB_DATA{1'b0}};
+            end else begin
+                case (op)
+                    ADD: begin
+                        full = {1'b0, a} + {1'b0, b};
+                        wrapped = full[NB_DATA-1:0];
+                        exp_carry = full[NB_DATA];
+                        ovf = (a[NB_DATA-1] == b[NB_DATA-1]) && (wrapped[NB_DATA-1] != a[NB_DATA-1]);
+                        exp_overflow = ovf;
+                        exp_result = ovf
+                            ? (a[NB_DATA-1] ? {1'b1, {(NB_DATA-1){1'b0}}} : {1'b0, {(NB_DATA-1){1'b1}}})
+                            : wrapped;
+                    end
+                    SUB: exp_result = a - b;
+                    AND: exp_result = a & b;
+                    OR:  exp_result = a | b;
+                    XOR: exp_result = a ^ b;
+                    SRA: exp_result = $signed(a) >>> b;
+                    SRL: exp_result = a >> b;
+                    NOR: exp_result = ~(a | b);
+                    default: exp_result = {NB_DATA{1'b0}};
+                endcase
             end
         end
     endtask
@@ -135,6 +191,40 @@ module tb_ALU;
 
         // ---------------- Opcode invalido (debe caer en default = 0) ----------------
         check_op("INVAL", 8'd5, 8'd5, INVALID_OP, 1'b1, 8'd0, 1'b0, 1'b0);
+
+        // ---------------- Entradas aleatorias (autochequeadas contra ref_model) ----------------
+        $display("--------------------------------------------------------");
+        $display(" Bloque de %0d entradas aleatorias (a, b, op, i_enable con $random)", NUM_RANDOM);
+        for (rnd_i = 0; rnd_i < NUM_RANDOM; rnd_i = rnd_i + 1) begin
+            i_a = $random;
+            i_b = $random;
+            i_enable = ($random % 10 != 0); // ~90% habilitada, ~10% deshabilitada
+            if ($random % 5 == 0) begin
+                rnd_op = $random; // opcode totalmente aleatorio: puede caer en el default
+            end else begin
+                case ($unsigned($random) % 8) // opcode valido, con distribucion pareja entre las 8 operaciones
+                    0: rnd_op = ADD;
+                    1: rnd_op = SUB;
+                    2: rnd_op = AND;
+                    3: rnd_op = OR;
+                    4: rnd_op = XOR;
+                    5: rnd_op = SRA;
+                    6: rnd_op = SRL;
+                    default: rnd_op = NOR;
+                endcase
+            end
+            i_op = rnd_op;
+            #10;
+
+            ref_model(i_a, i_b, i_op, i_enable, rnd_exp, rnd_exp_ov, rnd_exp_ca);
+            casos = casos + 1;
+            if (o_result !== rnd_exp || o_overflow !== rnd_exp_ov || o_carry !== rnd_exp_ca) begin
+                errores = errores + 1;
+                $display("[FALLO][RAND] a=%0d b=%0d en=%0d op=%b -> o_result=%0d ov=%b ca=%b | esperado=%0d ov=%b ca=%b",
+                    i_a, i_b, i_enable, i_op, o_result, o_overflow, o_carry, rnd_exp, rnd_exp_ov, rnd_exp_ca);
+            end
+        end
+        $display(" Bloque aleatorio: %0d casos ejecutados", NUM_RANDOM);
 
         $display("========================================================");
         if (errores == 0)
