@@ -118,6 +118,9 @@ always @(*) begin
             // en el estado de habilitación, no hago nada, me quedo en este estado hasta que haya un reset (o un clean)
             o_enable_alu = 1'b1; // habilito la salida de la ALU
         end
+        default: begin
+            state_next = WAIT_A; // si por alguna razón el estado es inválido, vuelvo a WAIT_A
+        end
     endcase
 
 end
