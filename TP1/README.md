@@ -21,21 +21,19 @@ Según el enunciado:
 
 Los datos A, B y el código de operación se ingresan por los switches de la Basys3 y se cargan a sus respectivos registros presionando un pulsador por campo (`btnL`→A, `btnC`→B, `btnR`→Op), en cualquier orden. La salida de la ALU se habilita recién cuando los tres campos ya fueron cargados al menos una vez, y queda habilitada de forma permanente (hasta el próximo reset): en cualquier momento se puede volver a presionar cualquiera de los tres botones para actualizar solo ese campo, reutilizando los otros dos. El resultado (más las banderas de overflow y carry) se muestra en los LEDs.
 
-![Esquemático RTL de top](images/Captura%20desde%202026-09-01%2009-55-54.png)
+![Esquemático RTL de top](images/top-esquematico-rtl.png)
 
 ### Módulos
 
-- **`debounce.v`**: FSM antirrebote de 4 estados con detector de flanco integrado. Filtra los rebotes mecánicos de un pulsador y entrega un pulso de 1 ciclo (`db_tick`) por cada pulsación real, esperando `N` ciclos de clock de estabilidad antes de confirmarla (parametrizable, para poder usar un `N` chico en simulación y uno realista — ~21 ms con clock de 100 MHz — en la síntesis).
-- **`load_ctrl.v`**: instancia un `debounce` por cada uno de los pulsadores de carga (A, B, Op) y tres flags "sticky" (uno por campo) que se levantan con su pulsador y solo se bajan con `reset`. La ALU se habilita cuando los tres flags están en 1 y queda habilitada así hasta el próximo reset; cualquiera de los tres botones puede volver a presionarse en cualquier momento (en cualquier orden) para actualizar solo su campo, reutilizando los otros dos sin resetear todo el sistema. El cuarto pulsador de la placa (`btnU`, antes "limpieza") quedó sin uso funcional con este diseño.
+- **`debounce.v`**: antirrebote de 4 estados con detector de flanco integrado. Filtra los rebotes mecánicos de un pulsador y entrega un pulso de 1 ciclo (`db_tick`) por cada pulsación real, esperando `N` ciclos de clock de estabilidad antes de confirmarla (parametrizable, para poder usar un `N` chico en simulación y uno realista — ~21 ms con clock de 100 MHz — en la síntesis).
+- **`load_ctrl.v`**: instancia un `debounce` por cada uno de los pulsadores de carga (A, B, Op) y tres flags "sticky" (uno por campo) que se levantan con su pulsador y solo se bajan con `reset`. La ALU se habilita cuando los tres flags están en 1 y queda habilitada así hasta el próximo reset; cualquiera de los tres botones puede volver a presionarse en cualquier momento (en cualquier orden) para actualizar solo su campo, reutilizando los otros dos sin resetear todo el sistema.
 
-  ![Esquemático RTL de load_ctrl](images/Captura%20desde%202026-09-01%2009-56-45.png)
-
-  > Captura de la versión anterior de `load_ctrl.v` (FSM de 4 estados). Pendiente de regenerar en Vivado tras el cambio a flags "sticky".
+![Esquemático RTL de load_ctrl](images/load_ctrl-esquematico-rtl.png)
 
 - **`reg_bank.v`**: registro genérico parametrizable por ancho (`WIDTH`), con reset y enable de carga síncronos. Se instancia tres veces (A, B y Op).
 - **`ALU.v`**: puramente combinacional. Implementa las 8 operaciones del enunciado (ADD, SUB, AND, OR, XOR, SRA, SRL, NOR) y calcula overflow con signo y carry sin signo para ADD (con saturación al valor límite representable en caso de overflow). Si `i_enable` está en 0, fuerza la salida a 0.
 
-  ![Esquemático RTL de la ALU](images/Captura%20desde%202026-09-01%2009-57-36.png)
+  ![Esquemático RTL de la ALU](images/ALU-esquematico-rtl.png)
 
 - **`top.v`**: conecta todo lo anterior con los pines físicos de la Basys3 y arma el vector de LEDs: `led[7:0]` = resultado, `led[8]` apagado (separador), `led[9]` = overflow, `led[10]` = carry.
 
@@ -51,7 +49,6 @@ Definido en `constraints/constraints.xdc`:
 | `btnL`      | Cargar A                                 | Botón izquierdo                            |
 | `btnC`      | Cargar B                                 | Botón central                              |
 | `btnR`      | Cargar Op                                | Botón derecho                              |
-| `btnU`      | Sin uso funcional                        | Botón superior                             |
 | `led[10:0]` | Resultado + separador + overflow + carry | LD10-LD0                                   |
 
 ## Verificación
@@ -66,35 +63,35 @@ Formas de onda de la simulación (`i_a`, `i_b`, `o_result` en decimal con signo 
 
 **ADD** — caso básico, carry sin overflow (`-1+1`) y overflow con saturación positiva (`127+1`, `127+127`) y negativa (`-128+-128`):
 
-![Waveform ALU - ADD](images/Captura%20desde%202026-09-01%2010-22-25.png)
+![Waveform ALU - ADD](images/tb_ALU-waveform-ADD.png)
 
 **SUB** — casos básicos con resultado positivo, negativo y cero:
 
-![Waveform ALU - SUB](images/Captura%20desde%202026-09-01%2010-23-10.png)
+![Waveform ALU - SUB](images/tb_ALU-waveform-SUB.png)
 
 **AND y OR**:
 
-![Waveform ALU - AND y OR](images/Captura%20desde%202026-09-01%2010-24-50.png)
+![Waveform ALU - AND y OR](images/tb_ALU-waveform-AND-OR.png)
 
 **XOR**:
 
-![Waveform ALU - XOR](images/Captura%20desde%202026-09-01%2010-25-15.png)
+![Waveform ALU - XOR](images/tb_ALU-waveform-XOR.png)
 
 **SRA y SRL** — mismo patrón de bits desplazado con y sin extensión de signo:
 
-![Waveform ALU - SRA y SRL](images/Captura%20desde%202026-09-01%2010-25-34.png)
+![Waveform ALU - SRA y SRL](images/tb_ALU-waveform-SRA-SRL.png)
 
 **Cola de SRL y NOR**:
 
-![Waveform ALU - SRL (cola) y NOR](images/Captura%20desde%202026-09-01%2010-26-02.png)
+![Waveform ALU - SRL (cola) y NOR](images/tb_ALU-waveform-SRL-cola-NOR.png)
 
 **`i_enable=0`** (fuerza `o_result=0` incluso con condición de overflow) **y opcode inválido** (cae en el `default` del `case`):
 
-![Waveform ALU - i_enable=0 y opcode inválido](images/Captura%20desde%202026-09-01%2010-26-28.png)
+![Waveform ALU - i_enable=0 y opcode inválido](images/tb_ALU-waveform-enable0-opcode-invalido.png)
 
 Resultado en consola de esa versión anterior (solo dirigidos): **25/25 casos pasaron**.
 
-![Log de simulación tb_ALU](images/Captura%20desde%202026-09-01%2009-54-10.png)
+![Log de simulación tb_ALU](images/tb_ALU-log-consola-dirigidos.png)
 
 #### Resultado actual, con el bloque de entradas aleatorias
 
@@ -141,91 +138,22 @@ Para completar el punto del enunciado sobre simular "incluyendo análisis de tie
 
 **Behavioral** (nombres de señal completos, sin sufijos de netlist):
 
-![Behavioral simulation tb_ALU](images/Captura%20desde%202026-09-01%2021-55-23.png)
+![Behavioral simulation tb_ALU](images/tb_ALU-sim-behavioral.png)
 
 **Post-Implementation Timing** (mismos estímulos, netlist post-síntesis/implementación):
 
-![Post-Implementation Timing simulation tb_ALU](images/Captura%20desde%202026-09-01%2021-54-42.png)
+![Post-Implementation Timing simulation tb_ALU](images/tb_ALU-sim-post-implementation-timing.png)
 
 ### `tb_top.v` — sistema completo (datapath + control)
 
 Simula la secuencia real de carga por switches y pulsadores (con antirrebote modelado, incluyendo rebotes simulados y pulsos por debajo del umbral de confirmación), los flags "sticky" de `load_ctrl` que habilitan la ALU en cualquier orden de carga, el latcheo de A/B/Op una vez habilitada, el reset a mitad de carga y la reutilización de campos individuales sin perder la habilitación. `N_DEBOUNCE` se reduce solo para esta instancia de simulación, para no tener que esperar los ~21 ms reales del antirrebote de hardware.
-
-> El log de consola de abajo corresponde a la versión anterior del testbench (cuando `load_ctrl` todavía era una FSM de 4 estados con botón de "limpieza"). Los casos que cambiaron de nombre/comportamiento (`MIDSEQ`, `CLEAN-*` → ahora `FREEORDER`/`REUSE`/`CLEAN-NOOP`) quedan pendientes de volver a correr en Vivado (o con `iverilog`, no disponible en este entorno) para actualizar este log y el conteo de casos.
-
-```
-========================================================
- Testbench de sistema completo (top) - N_DEBOUNCE(sim)=4
-========================================================
-    [DEBOUNCE] tick_a  #1 confirmado en t=195000
-    [DEBOUNCE] tick_b  #1 confirmado en t=695000
-    [DEBOUNCE] tick_op #1 confirmado en t=1195000
-[OK]                 ADD a=10 b=20 op=100000 -> result=30(0x1e) ov=0 ca=0
-    [DEBOUNCE] tick_a  #2 confirmado en t=1745000
-    [DEBOUNCE] tick_b  #2 confirmado en t=2245000
-    [DEBOUNCE] tick_op #2 confirmado en t=2745000
-[OK]             ADD-OVP a=127 b=1 op=100000 -> result=127(0x7f) ov=1 ca=0
-    [DEBOUNCE] tick_a  #3 confirmado en t=3295000
-    [DEBOUNCE] tick_b  #3 confirmado en t=3795000
-    [DEBOUNCE] tick_op #3 confirmado en t=4295000
-[OK]             ADD-OVN a=-128 b=-128 op=100000 -> result=128(0x80) ov=1 ca=1
-    [DEBOUNCE] tick_a  #4 confirmado en t=4845000
-    [DEBOUNCE] tick_b  #4 confirmado en t=5345000
-    [DEBOUNCE] tick_op #4 confirmado en t=5845000
-[OK]              ADD-CA a=-1 b=1 op=100000 -> result=0(0x0) ov=0 ca=1
-    [DEBOUNCE] tick_a  #5 confirmado en t=6395000
-    [DEBOUNCE] tick_b  #5 confirmado en t=6895000
-    [DEBOUNCE] tick_op #5 confirmado en t=7395000
-[OK]                 SUB a=10 b=20 op=100010 -> result=246(0xf6) ov=0 ca=0
-    [DEBOUNCE] tick_a  #6 confirmado en t=7945000
-    [DEBOUNCE] tick_b  #6 confirmado en t=8445000
-    [DEBOUNCE] tick_op #6 confirmado en t=8945000
-[OK]                 SRA a=-128 b=2 op=000011 -> result=224(0xe0) ov=0 ca=0
-    [DEBOUNCE] tick_a  #7 confirmado en t=9495000
-    [DEBOUNCE] tick_b  #7 confirmado en t=9995000
-    [DEBOUNCE] tick_op #7 confirmado en t=10495000
-[OK]                 SRL a=-128 b=2 op=000010 -> result=32(0x20) ov=0 ca=0
-    [DEBOUNCE] tick_a  #8 confirmado en t=11045000
-    [DEBOUNCE] tick_b  #8 confirmado en t=11545000
-    [DEBOUNCE] tick_op #8 confirmado en t=12045000
-[OK]                 NOR a=0 b=0 op=100111 -> result=255(0xff) ov=0 ca=0
---------------------------------------------------------
- Verificando que A/B/OP queden latcheados una vez en ENABLE
-[OK]    LATCH    mover sw a 0x55 no afecta el resultado ya cargado (result=0xff)
---------------------------------------------------------
- Probando filtrado de rebotes en btnL
-    [DEBOUNCE] tick_a  #1 confirmado en t=13005000
-[OK]    BOUNCE   4 rebotes filtrados, 1 solo tick_a, A=42, estado=  WAIT_B
- Probando que un pulso mas corto que el antirrebote NO dispare el tick
-[OK]    BOUNCE   pulso corto (5 ciclos) correctamente ignorado, sin tick_a
---------------------------------------------------------
- Probando reset a mitad de la secuencia de carga (antes de completar B y OP)
-    [DEBOUNCE] tick_a  #1 confirmado en t=13905000
-[OK]    MIDSEQ   tras cargar A, estado=  WAIT_B
-[OK]    MIDSEQ   reset a mitad de secuencia vuelve a WAIT_A y led=0
---------------------------------------------------------
- Probando el boton de limpieza (clean): no debe borrar A/B/OP ya cargados
-    [DEBOUNCE] tick_a  #2 confirmado en t=14485000
-    [DEBOUNCE] tick_b  #9 confirmado en t=14985000
-    [DEBOUNCE] tick_op #9 confirmado en t=15485000
-[OK]    CLEAN-PRE  15+5=20 cargado y habilitado antes de limpiar
-[OK]    CLEAN    vuelve a WAIT_A, led=0, pero A=15 B=5 OP=100000 siguen intactos
-    [DEBOUNCE] tick_a  #3 confirmado en t=16495000
-    [DEBOUNCE] tick_b  #10 confirmado en t=16995000
-    [DEBOUNCE] tick_op #10 confirmado en t=17495000
-[OK]    CLEAN-POST tras clean, nueva operacion SUB reutilizando A/B: 15-5=10
-========================================================
- RESULTADO: TODOS LOS CASOS PASARON (16/16)
-========================================================
-$finish called at time : 17845 ns : File "/home/wanda/Documentos/Facultad/AdC/AdC-Tps/TP1/sim/tb_top.v" Line 335
-```
 
 ## Resultados
 
 - **`tb_ALU.v`**: **325/325 casos pasaron** (25 dirigidos — las 8 operaciones, casos borde de overflow/carry en ADD con y sin saturación, `i_enable=0`, opcode inválido — más 300 aleatorios autochequeados contra `ref_model`).
 - **`tb_top.v`**: datapath completo, latcheo de registros, antirrebote real con rebotes simulados, reset a mitad de carga y reutilización de A/B/Op en cualquier orden — casos y log de consola pendientes de re-ejecutar tras el cambio de `load_ctrl.v` (ver nota en [Verificación](#verificación)).
 - Síntesis, implementación y generación de bitstream completadas sin errores en Vivado; validado en hardware sobre la Basys3.
-- Simulación post-implementación con timing corrida sobre `tb_ALU.v`: mismos resultados que en behavioral. Timing Summary sin violaciones — **WNS 4.671 ns / WHS 0.195 ns / WPWS 4.500 ns, 0 endpoints fallando** en Setup, Hold y Pulse Width ("All user specified timing constraints are met").
+- Simulación post-implementación con timing corrida sobre `tb_ALU.v`: mismos resultados que en behavioral. Timing Summary sin violaciones — **WNS 5.303 ns / WHS 0.268 ns / WPWS 4.500 ns, 0 endpoints fallando** en Setup, Hold y Pulse Width ("All user specified timing constraints are met").
 
 ## Cómo simular / sintetizar
 
@@ -241,9 +169,9 @@ El enunciado pide simular "incluyendo análisis de tiempo", distinto de la simul
 2. En el desplegable de **Run Simulation** (Flow Navigator → Simulation), elegir **Post-Implementation Timing Simulation** en vez de la _Behavioral_ de siempre — simula el netlist ya ruteado, con el SDF de retardos reales back-anotado. Waveform comparada contra behavioral en la sección `tb_ALU.v` de [Verificación](#verificación) más arriba, mismo resultado en ambas.
 3. Abrir el **Timing Summary** (post-implementación) y confirmar que no haya _timing violations_ para el `create_clock` de 100 MHz definido en `constraints.xdc`:
 
-   ![Timing Summary post-implementación](images/Captura%20desde%202026-09-01%2021-57-39.png)
+   ![Timing Summary post-implementación](images/top-timing-summary-post-implementacion.png)
 
-   **Setup** — WNS: 4.671 ns, TNS: 0.000 ns, 0/201 endpoints fallando · **Hold** — WHS: 0.195 ns, THS: 0.000 ns, 0/201 endpoints fallando · **Pulse Width** — WPWS: 4.500 ns, TPWS: 0.000 ns, 0/115 endpoints fallando. _"All user specified timing constraints are met."_
+   **Setup** — WNS: 5.303 ns, TNS: 0.000 ns, 0/151 endpoints fallando · **Hold** — WHS: 0.268 ns, THS: 0.000 ns, 0/151 endpoints fallando · **Pulse Width** — WPWS: 4.500 ns, TPWS: 0.000 ns, 0/92 endpoints fallando. _"All user specified timing constraints are met."_
 
 ## Guía de casos de prueba en la FPGA
 
@@ -278,10 +206,9 @@ Los pulsadores tienen antirrebote real (~21 ms); un toque normal alcanza, no hac
 
 ### Casos de control (carga libre / antirrebote)
 
-| #   | Procedimiento                                                                                                                   | Resultado esperado                                                                                                                                          |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 13  | Cargar A, B, Op (cualquier caso de la tabla) y, ya con el resultado en los LEDs, mover los switches sin presionar ningún botón | El resultado en los LEDs **no cambia** (A/B/Op quedan latcheados hasta el próximo `btnL`/`btnC`/`btnR`)                                                     |
-| 14  | Con un resultado ya mostrado, cambiar **SW5-SW0** a otra operación y presionar solo **btnR**                                    | El resultado se recalcula con la nueva Op, reutilizando A y B tal cual estaban cargados (no hace falta volver a tocar btnL/btnC)                            |
-| 15  | Cargar solo A (presionar btnL) y luego presionar **btnD** (reset) antes de cargar B                                              | Todos los LEDs quedan apagados y hay que volver a cargar A, B y Op desde cero (el reset borra los registros y la habilitación)                              |
-| 16  | Cargar Op primero, después B, y por último A (orden distinto al de la tabla de pines)                                            | La ALU igual se habilita recién al completar el tercer campo, sin importar en qué orden se cargó cada uno                                                   |
-| 17  | Presionar **btnU**                                                                                                               | No tiene ningún efecto (queda sin uso funcional en este diseño)                                                                                              |
+| #   | Procedimiento                                                                                                                  | Resultado esperado                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| 13  | Cargar A, B, Op (cualquier caso de la tabla) y, ya con el resultado en los LEDs, mover los switches sin presionar ningún botón | El resultado en los LEDs **no cambia** (A/B/Op quedan latcheados hasta el próximo `btnL`/`btnC`/`btnR`)                          |
+| 14  | Con un resultado ya mostrado, cambiar **SW5-SW0** a otra operación y presionar solo **btnR**                                   | El resultado se recalcula con la nueva Op, reutilizando A y B tal cual estaban cargados (no hace falta volver a tocar btnL/btnC) |
+| 15  | Cargar solo A (presionar btnL) y luego presionar **btnD** (reset) antes de cargar B                                            | Todos los LEDs quedan apagados y hay que volver a cargar A, B y Op desde cero (el reset borra los registros y la habilitación)   |
+| 16  | Cargar Op primero, después B, y por último A (orden distinto al de la tabla de pines)                                          | La ALU igual se habilita recién al completar el tercer campo, sin importar en qué orden se cargó cada uno                        |
