@@ -1,19 +1,28 @@
-// Máquina de estados que orquesta la carga secuencial de A, B y Op desde los
-// switches, cada uno disparado por su propio botón (con antirrebote), y
-// habilita la salida de la ALU recién cuando los tres ya fueron cargados.
-// También soporta un botón de "limpieza" (i_clean) que salta directamente a
-// ENABLE reusando lo que ya esté cargado en los reg_bank (no los toca), útil
-// para volver a mostrar un resultado ya calculado sin resetear todo el
-// diseño. Una vez en ENABLE, además, cada botón A/B/Op sigue funcionando:
-// permite actualizar un único operando (o la operación) sin perder los
-// otros dos, para repetir/variar una operación reusando el resto de A/B/Op.
+// Controla la carga de A, B y Op desde los switches, cada uno disparado por
+// su propio botón (con antirrebote), y habilita la salida de la ALU una vez
+// que los tres fueron cargados al menos una vez desde el último reset.
+//
+// A diferencia del diseño anterior (una FSM de 4 estados que forzaba el
+// orden A -> B -> Op), acá los tres se pueden cargar en cualquier orden, con
+// tres flags "sticky" (loaded_a/b/op) que se levantan con su tick y solo se
+// bajan con reset. Una vez que los tres están levantados, o_enable_alu queda
+// habilitado para siempre (hasta el próximo reset): en cualquier momento se
+// puede volver a tocar cualquiera de los tres botones para actualizar solo
+// ese registro —reusando lo que ya haya en los otros dos— sin perder la
+// habilitación.
+//
+// i_clean quedó sin uso funcional con este diseño: al ser el enable
+// "pegajoso" una vez configurado, no hace falta ningún botón para "volver" a
+// él (que era lo único que hacía). Se deja el puerto declarado por
+// compatibilidad con top.v (mapeado a btnU en la placa), pero no se conecta
+// a ninguna lógica interna.
 module load_ctrl #(
     parameter N_DEBOUNCE = 20 // Number of bits for the debounce counter
 ) (
     input wire i_a,
     input wire i_b,
     input wire i_OP,
-    input wire i_clean, // salta a ENABLE (reusa A/B/Op ya cargados) sin tocar los registros
+    input wire i_clean, // sin uso funcional (ver comentario de arriba)
     input wire clk,
     input wire reset,
     output reg o_enb_reg_A,
@@ -24,9 +33,9 @@ module load_ctrl #(
 
 // Pulsos de 1 ciclo, ya libres de rebotes, que indica cada antirrebote
 // cuando confirma una pulsación real de su botón correspondiente.
-wire tick_a, tick_b, tick_op, tick_clean;
+wire tick_a, tick_b, tick_op;
 
-// Un antirrebote por cada botón de control: cada uno filtra los rebotes
+// Un antirrebote por cada botón de carga: cada uno filtra los rebotes
 // mecánicos de su entrada y entrega un único pulso (db_tick) por pulsación.
 debounce #(.N(N_DEBOUNCE)) db_a (
     .clk(clk),          // Clock input
@@ -50,91 +59,33 @@ debounce #(.N(N_DEBOUNCE)) db_op (
     .db_tick(tick_op)
 );
 
-debounce #(.N(N_DEBOUNCE)) db_clean (
-    .clk(clk),
-    .reset(reset),
-    .sw(i_clean),
-    .db_tick(tick_clean)
-);
+// Flags "sticky": se levantan la primera vez que se confirma el botón
+// correspondiente y solo se bajan con reset. Reemplazan a la memoria de
+// estado de la FSM anterior: no hace falta recordar "en qué paso de la
+// secuencia" estamos, solo si cada dato ya fue cargado alguna vez.
+reg loaded_a, loaded_b, loaded_op;
 
-
-// Estados de la FSM: la primera carga se espera un botón por vez, en orden
-// fijo A -> B -> Op; una vez en ENABLE se permanece ahí (mostrando
-// resultado) y cualquiera de los tres botones recarga solo su registro sin
-// salir de ENABLE, hasta que haya un reset.
-localparam [1:0]
-    WAIT_A = 2'b00,     // estado de espera para el boton A
-    WAIT_B = 2'b01,     // estado de espera para el boton B
-    WAIT_OP = 2'b10,    // estado de espera para el boton OP
-    ENABLE = 2'b11;     // estado de habilitación
-
-// Registro de estado actual y su valor combinacional "próximo estado"
-reg [1:0] state_reg, state_next;
-
-// Memoria de estado con reset y "clean" síncronos: ambos únicos que tocan
-// state_reg directamente (todo lo demás se decide en el bloque combinacional).
 always @(posedge clk) begin
     if (reset) begin
-        state_reg <= WAIT_A; // si hay reset, vuelvo al estado de espera para A
-    end else if (tick_clean) begin
-        state_reg <= ENABLE; // "clean": salto directo a ENABLE reusando lo que
-                              // ya esté cargado en los reg_bank (no los toca)
+        loaded_a  <= 1'b0;
+        loaded_b  <= 1'b0;
+        loaded_op <= 1'b0;
     end else begin
-        state_reg <= state_next; // si no hay reset ni clean, paso al siguiente estado
+        if (tick_a)  loaded_a  <= 1'b1;
+        if (tick_b)  loaded_b  <= 1'b1;
+        if (tick_op) loaded_op <= 1'b1;
     end
 end
 
-
-// Lógica combinacional de transición y de salida. Todas las salidas arrancan
-// en 0 cada evaluación (evita inferir latches) y solo la rama del estado
-// activo las levanta — así, con solo cambiar de estado, las demás quedan
-// automáticamente deshabilitadas sin código extra por estado.
+// Lógica combinacional de salida: los pulsos de carga van directo a los
+// reg_bank en cualquier momento (se puede recargar A, B u Op individualmente,
+// antes o después de habilitar la ALU, sin afectar a los otros dos), y el
+// enable de la ALU refleja si los tres ya fueron cargados alguna vez.
 always @(*) begin
-    state_next = state_reg; // por default, el siguiente estado es el mismo que el actual
-
-    // por default, no habilito ninguna salida
-    o_enb_reg_A  = 1'b0;
-    o_enb_reg_B  = 1'b0;
-    o_enb_reg_OP = 1'b0;
-    o_enable_alu = 1'b0;
-
-    //veo en que estado estoy y que hago
-    case (state_reg)                        // dependiendo del estado en el que estoy, hago algo distinto
-        WAIT_A: begin                       // si estoy en el estado de espera para A, espero a que haya un flanco en A
-            if (tick_a) begin               // si hay un flanco en A, paso al estado de espera para B
-                state_next = WAIT_B;        // si no hay flanco en A, me quedo en el estado de espera para A
-                o_enb_reg_A = 1'b1;         // pulso de 1 ciclo: reg_bank de A lo usa como su i_load_reg
-            end
-        end
-        WAIT_B: begin
-            if (tick_b) begin // si hay un flanco en B, paso al estado de espera para OP
-                state_next = WAIT_OP;
-                o_enb_reg_B = 1'b1;
-            end
-        end
-        WAIT_OP: begin
-            if (tick_op) begin // si hay un flanco en OP, paso al estado de habilitación
-                state_next = ENABLE;
-                o_enb_reg_OP = 1'b1;
-            end
-        end
-        ENABLE: begin
-            // en el estado de habilitación me quedo hasta que haya un reset;
-            // mientras tanto, cualquiera de los tres botones recarga solo su
-            // registro (reusando los otros dos) sin salir de ENABLE.
-            o_enable_alu = 1'b1; // habilito la salida de la ALU
-            if (tick_a)
-                o_enb_reg_A = 1'b1;
-            if (tick_b)
-                o_enb_reg_B = 1'b1;
-            if (tick_op)
-                o_enb_reg_OP = 1'b1;
-        end
-        default: begin
-            state_next = WAIT_A; // si por alguna razón el estado es inválido, vuelvo a WAIT_A
-        end
-    endcase
-
+    o_enb_reg_A  = tick_a;
+    o_enb_reg_B  = tick_b;
+    o_enb_reg_OP = tick_op;
+    o_enable_alu = loaded_a & loaded_b & loaded_op;
 end
 
 endmodule

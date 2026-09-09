@@ -19,16 +19,18 @@ Según el enunciado:
 
 ## Arquitectura general
 
-Los datos A, B y el código de operación se ingresan por los switches de la Basys3 y se cargan a sus respectivos registros presionando un pulsador por campo (`btnL`→A, `btnC`→B, `btnR`→Op). Una máquina de estados exige que la carga se haga en ese orden y recién habilita la salida de la ALU cuando los tres campos ya fueron cargados. El resultado (más las banderas de overflow y carry) se muestra en los LEDs.
+Los datos A, B y el código de operación se ingresan por los switches de la Basys3 y se cargan a sus respectivos registros presionando un pulsador por campo (`btnL`→A, `btnC`→B, `btnR`→Op), en cualquier orden. La salida de la ALU se habilita recién cuando los tres campos ya fueron cargados al menos una vez, y queda habilitada de forma permanente (hasta el próximo reset): en cualquier momento se puede volver a presionar cualquiera de los tres botones para actualizar solo ese campo, reutilizando los otros dos. El resultado (más las banderas de overflow y carry) se muestra en los LEDs.
 
 ![Esquemático RTL de top](images/Captura%20desde%202026-09-01%2009-55-54.png)
 
 ### Módulos
 
 - **`debounce.v`**: FSM antirrebote de 4 estados con detector de flanco integrado. Filtra los rebotes mecánicos de un pulsador y entrega un pulso de 1 ciclo (`db_tick`) por cada pulsación real, esperando `N` ciclos de clock de estabilidad antes de confirmarla (parametrizable, para poder usar un `N` chico en simulación y uno realista — ~21 ms con clock de 100 MHz — en la síntesis).
-- **`load_ctrl.v`**: instancia un `debounce` por cada uno de los 4 pulsadores (A, B, Op y el de "limpieza") y una FSM de 4 estados (`WAIT_A → WAIT_B → WAIT_OP → ENABLE`) que habilita, de a uno, el `reg_bank` correspondiente y finalmente la salida de la ALU. El pulsador de limpieza (`btnU`) vuelve la FSM a `WAIT_A` sin borrar lo ya cargado en los registros, para poder reutilizar A/B en una operación nueva sin resetear todo el sistema.
+- **`load_ctrl.v`**: instancia un `debounce` por cada uno de los pulsadores de carga (A, B, Op) y tres flags "sticky" (uno por campo) que se levantan con su pulsador y solo se bajan con `reset`. La ALU se habilita cuando los tres flags están en 1 y queda habilitada así hasta el próximo reset; cualquiera de los tres botones puede volver a presionarse en cualquier momento (en cualquier orden) para actualizar solo su campo, reutilizando los otros dos sin resetear todo el sistema. El cuarto pulsador de la placa (`btnU`, antes "limpieza") quedó sin uso funcional con este diseño.
 
   ![Esquemático RTL de load_ctrl](images/Captura%20desde%202026-09-01%2009-56-45.png)
+
+  > Captura de la versión anterior de `load_ctrl.v` (FSM de 4 estados). Pendiente de regenerar en Vivado tras el cambio a flags "sticky".
 
 - **`reg_bank.v`**: registro genérico parametrizable por ancho (`WIDTH`), con reset y enable de carga síncronos. Se instancia tres veces (A, B y Op).
 - **`ALU.v`**: puramente combinacional. Implementa las 8 operaciones del enunciado (ADD, SUB, AND, OR, XOR, SRA, SRL, NOR) y calcula overflow con signo y carry sin signo para ADD (con saturación al valor límite representable en caso de overflow). Si `i_enable` está en 0, fuerza la salida a 0.
@@ -49,7 +51,7 @@ Definido en `constraints/constraints.xdc`:
 | `btnL`      | Cargar A                                 | Botón izquierdo                            |
 | `btnC`      | Cargar B                                 | Botón central                              |
 | `btnR`      | Cargar Op                                | Botón derecho                              |
-| `btnU`      | Limpiar (sin borrar registros)           | Botón superior                             |
+| `btnU`      | Sin uso funcional                        | Botón superior                             |
 | `led[10:0]` | Resultado + separador + overflow + carry | LD10-LD0                                   |
 
 ## Verificación
@@ -147,7 +149,9 @@ Para completar el punto del enunciado sobre simular "incluyendo análisis de tie
 
 ### `tb_top.v` — sistema completo (datapath + control)
 
-Simula la secuencia real de carga por switches y pulsadores (con antirrebote modelado, incluyendo rebotes simulados y pulsos por debajo del umbral de confirmación), la máquina de estados de `load_ctrl`, el latcheo de A/B/Op una vez en `ENABLE`, el reset a mitad de secuencia y el botón de limpieza (`btnU`). `N_DEBOUNCE` se reduce solo para esta instancia de simulación, para no tener que esperar los ~21 ms reales del antirrebote de hardware.
+Simula la secuencia real de carga por switches y pulsadores (con antirrebote modelado, incluyendo rebotes simulados y pulsos por debajo del umbral de confirmación), los flags "sticky" de `load_ctrl` que habilitan la ALU en cualquier orden de carga, el latcheo de A/B/Op una vez habilitada, el reset a mitad de carga y la reutilización de campos individuales sin perder la habilitación. `N_DEBOUNCE` se reduce solo para esta instancia de simulación, para no tener que esperar los ~21 ms reales del antirrebote de hardware.
+
+> El log de consola de abajo corresponde a la versión anterior del testbench (cuando `load_ctrl` todavía era una FSM de 4 estados con botón de "limpieza"). Los casos que cambiaron de nombre/comportamiento (`MIDSEQ`, `CLEAN-*` → ahora `FREEORDER`/`REUSE`/`CLEAN-NOOP`) quedan pendientes de volver a correr en Vivado (o con `iverilog`, no disponible en este entorno) para actualizar este log y el conteo de casos.
 
 ```
 ========================================================
@@ -219,7 +223,7 @@ $finish called at time : 17845 ns : File "/home/wanda/Documentos/Facultad/AdC/Ad
 ## Resultados
 
 - **`tb_ALU.v`**: **325/325 casos pasaron** (25 dirigidos — las 8 operaciones, casos borde de overflow/carry en ADD con y sin saturación, `i_enable=0`, opcode inválido — más 300 aleatorios autochequeados contra `ref_model`).
-- **`tb_top.v`**: 16/16 casos pasaron (datapath completo, latcheo de registros, antirrebote real con rebotes simulados, reset a mitad de secuencia y botón de limpieza).
+- **`tb_top.v`**: datapath completo, latcheo de registros, antirrebote real con rebotes simulados, reset a mitad de carga y reutilización de A/B/Op en cualquier orden — casos y log de consola pendientes de re-ejecutar tras el cambio de `load_ctrl.v` (ver nota en [Verificación](#verificación)).
 - Síntesis, implementación y generación de bitstream completadas sin errores en Vivado; validado en hardware sobre la Basys3.
 - Simulación post-implementación con timing corrida sobre `tb_ALU.v`: mismos resultados que en behavioral. Timing Summary sin violaciones — **WNS 4.671 ns / WHS 0.195 ns / WPWS 4.500 ns, 0 endpoints fallando** en Setup, Hold y Pulse Width ("All user specified timing constraints are met").
 
@@ -245,11 +249,11 @@ El enunciado pide simular "incluyendo análisis de tiempo", distinto de la simul
 
 Procedimiento general (ver [Mapeo de pines](#mapeo-de-pines-basys3)):
 
-1. Presionar **btnD** (reset) para volver a `WAIT_A` con todo en cero.
+1. Presionar **btnD** (reset) para limpiar todo (registros en 0, ALU deshabilitada).
 2. Configurar **SW7-SW0** = A, presionar **btnL**.
 3. Configurar **SW7-SW0** = B, presionar **btnC**.
-4. Configurar **SW5-SW0** = Op (SW7/SW6 no importan), presionar **btnR** → el resultado queda fijo en los LEDs.
-5. Para probar otro caso: presionar **btnD** (borra todo) o **btnU** (mantiene A/B/Op ya cargados) y repetir desde el paso correspondiente.
+4. Configurar **SW5-SW0** = Op (SW7/SW6 no importan), presionar **btnR** → el resultado queda fijo en los LEDs. Los pasos 2-4 pueden hacerse en cualquier orden; la ALU se habilita recién cuando los tres ya fueron cargados una vez.
+5. Para probar otro caso: presionar **btnD** (borra todo) o volver a presionar solo el botón del campo que se quiera cambiar (los otros dos se reutilizan tal cual estaban).
 
 Los pulsadores tienen antirrebote real (~21 ms); un toque normal alcanza, no hace falta mantenerlos apretados.
 
@@ -272,10 +276,12 @@ Los pulsadores tienen antirrebote real (~21 ms); un toque normal alcanza, no hac
 
 `LD8` tiene que quedar **apagado siempre** (es el separador entre resultado y banderas); si se enciende, hay un problema de mapeo de pines.
 
-### Casos de control (FSM / antirrebote)
+### Casos de control (carga libre / antirrebote)
 
-| #   | Procedimiento                                                                                                                  | Resultado esperado                                                                                                                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 13  | Cargar A, B, Op (cualquier caso de la tabla) y, ya con el resultado en los LEDs, mover los switches sin presionar ningún botón | El resultado en los LEDs **no cambia** (A/B/Op quedan latcheados hasta el próximo `btnL`/`btnC`/`btnR`)                                                                             |
-| 14  | Con un resultado ya mostrado, presionar **btnU** (clean)                                                                       | Los LEDs se apagan por completo (vuelve a `WAIT_A`), pero A/B/Op **no se pierden**: si se vuelve a presionar btnL→btnC→btnR sin tocar los switches, se reobtiene el mismo resultado |
-| 15  | Cargar solo A (presionar btnL) y luego presionar **btnD** (reset) antes de cargar B                                            | Todos los LEDs quedan apagados y hay que volver a cargar A, B y Op desde cero (el reset sí borra los registros, a diferencia de btnU)                                               |
+| #   | Procedimiento                                                                                                                   | Resultado esperado                                                                                                                                          |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 13  | Cargar A, B, Op (cualquier caso de la tabla) y, ya con el resultado en los LEDs, mover los switches sin presionar ningún botón | El resultado en los LEDs **no cambia** (A/B/Op quedan latcheados hasta el próximo `btnL`/`btnC`/`btnR`)                                                     |
+| 14  | Con un resultado ya mostrado, cambiar **SW5-SW0** a otra operación y presionar solo **btnR**                                    | El resultado se recalcula con la nueva Op, reutilizando A y B tal cual estaban cargados (no hace falta volver a tocar btnL/btnC)                            |
+| 15  | Cargar solo A (presionar btnL) y luego presionar **btnD** (reset) antes de cargar B                                              | Todos los LEDs quedan apagados y hay que volver a cargar A, B y Op desde cero (el reset borra los registros y la habilitación)                              |
+| 16  | Cargar Op primero, después B, y por último A (orden distinto al de la tabla de pines)                                            | La ALU igual se habilita recién al completar el tercer campo, sin importar en qué orden se cargó cada uno                                                   |
+| 17  | Presionar **btnU**                                                                                                               | No tiene ningún efecto (queda sin uso funcional en este diseño)                                                                                              |
