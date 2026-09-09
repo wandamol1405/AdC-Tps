@@ -276,9 +276,9 @@ module tb_top;
                 state_name(dut.u_load_ctrl.state_reg), led);
         end
 
-        // ---------------- "clean" (btnU): vuelve a WAIT_A sin borrar A/B/OP ----------------
+        // ---------------- "clean" (btnU): salta a ENABLE reusando A/B/OP ----------------
         $display("--------------------------------------------------------");
-        $display(" Probando el boton de limpieza (clean): no debe borrar A/B/OP ya cargados");
+        $display(" Probando el boton de limpieza (clean): reusa A/B/OP ya cargados, sin volver a pedirlos");
         do_reset;
         sw = 8'sd15;
         press_clean(BTN_A, 25);
@@ -296,35 +296,34 @@ module tb_top;
                 state_name(dut.u_load_ctrl.state_reg), led[NB_DATA-1:0]);
         end
 
-        // Presiono "clean" (btnU) sin pasar por reset
+        // Presiono "clean" (btnU) sin pasar por reset: ahora salta directo a
+        // ENABLE (no a WAIT_A), reusando A/B/OP tal cual estaban.
         press_clean(BTN_CLEAN, 25);
         casos = casos + 1;
-        if (dut.u_load_ctrl.state_reg == 2'b00 && led == {NB_LED{1'b0}} &&
+        if (dut.u_load_ctrl.state_reg == 2'b11 && led[NB_DATA-1:0] === 8'd20 &&
             dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5 && dut.reg_op_out === ADD) begin
-            $display("[OK]    CLEAN    vuelve a WAIT_A, led=0, pero A=%0d B=%0d OP=%b siguen intactos",
-                dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
+            $display("[OK]    CLEAN    salta directo a ENABLE reusando A=%0d B=%0d OP=%b (result=%0d)",
+                dut.reg_a_out, dut.reg_b_out, dut.reg_op_out, led[NB_DATA-1:0]);
         end else begin
             errores = errores + 1;
-            $display("[FALLO] CLEAN    estado=%s led=%b A=%0d B=%0d OP=%b (esperado WAIT_A, led=0, A=15 B=5 OP=ADD intactos)",
+            $display("[FALLO] CLEAN    estado=%s led=%b A=%0d B=%0d OP=%b (esperado ENABLE, result=20, A=15 B=5 OP=ADD intactos)",
                 state_name(dut.u_load_ctrl.state_reg), led, dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
         end
 
-        // Nueva operacion reutilizando los mismos A y B (solo cambio OP a SUB).
-        // La FSM igual exige volver a confirmar cada etapa; lo que "clean" evita
-        // es que reg_bank haya perdido los valores viejos mientras tanto.
-        sw = 8'sd15;
-        press_clean(BTN_A, 25);
-        sw = 8'sd5;
-        press_clean(BTN_B, 25);
+        // Cambio SOLO la operacion (a SUB) sin tocar los switches de A/B:
+        // dentro de ENABLE, presionar OP recarga unicamente ese registro,
+        // reusando A y B que ya estaban cargados.
         sw = SUB;
         press_clean(BTN_OP, 25);
         @(posedge clk);
         casos = casos + 1;
-        if (led[NB_DATA-1:0] === 8'd10) begin // 15-5=10
-            $display("[OK]    CLEAN-POST tras clean, nueva operacion SUB reutilizando A/B: 15-5=%0d", led[NB_DATA-1:0]);
+        if (dut.u_load_ctrl.state_reg == 2'b11 && led[NB_DATA-1:0] === 8'd10 &&
+            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5) begin // 15-5=10
+            $display("[OK]    CLEAN-POST en ENABLE, solo cambie OP a SUB reutilizando A/B: 15-5=%0d", led[NB_DATA-1:0]);
         end else begin
             errores = errores + 1;
-            $display("[FALLO] CLEAN-POST resultado=0x%0h (esperado 10)", led[NB_DATA-1:0]);
+            $display("[FALLO] CLEAN-POST estado=%s resultado=0x%0h A=%0d B=%0d (esperado ENABLE, 10, A=15 B=5)",
+                state_name(dut.u_load_ctrl.state_reg), led[NB_DATA-1:0], dut.reg_a_out, dut.reg_b_out);
         end
 
         $display("========================================================");

@@ -1,16 +1,19 @@
 // Máquina de estados que orquesta la carga secuencial de A, B y Op desde los
 // switches, cada uno disparado por su propio botón (con antirrebote), y
 // habilita la salida de la ALU recién cuando los tres ya fueron cargados.
-// También soporta un botón de "limpieza" (i_clean) que reinicia la secuencia
-// sin borrar lo ya cargado en los reg_bank, útil para repetir una operación
-// reusando A/B/Op sin tener que resetear todo el diseño.
+// También soporta un botón de "limpieza" (i_clean) que salta directamente a
+// ENABLE reusando lo que ya esté cargado en los reg_bank (no los toca), útil
+// para volver a mostrar un resultado ya calculado sin resetear todo el
+// diseño. Una vez en ENABLE, además, cada botón A/B/Op sigue funcionando:
+// permite actualizar un único operando (o la operación) sin perder los
+// otros dos, para repetir/variar una operación reusando el resto de A/B/Op.
 module load_ctrl #(
     parameter N_DEBOUNCE = 20 // Number of bits for the debounce counter
 ) (
     input wire i_a,
     input wire i_b,
     input wire i_OP,
-    input wire i_clean, // vuelve a WAIT_A y apaga la ALU sin tocar lo cargado en los registros
+    input wire i_clean, // salta a ENABLE (reusa A/B/Op ya cargados) sin tocar los registros
     input wire clk,
     input wire reset,
     output reg o_enb_reg_A,
@@ -55,8 +58,10 @@ debounce #(.N(N_DEBOUNCE)) db_clean (
 );
 
 
-// Estados de la FSM: se espera un botón por vez, en orden fijo A -> B -> Op,
-// y una vez en ENABLE se permanece ahí (mostrando resultado) hasta reset o clean.
+// Estados de la FSM: la primera carga se espera un botón por vez, en orden
+// fijo A -> B -> Op; una vez en ENABLE se permanece ahí (mostrando
+// resultado) y cualquiera de los tres botones recarga solo su registro sin
+// salir de ENABLE, hasta que haya un reset.
 localparam [1:0]
     WAIT_A = 2'b00,     // estado de espera para el boton A
     WAIT_B = 2'b01,     // estado de espera para el boton B
@@ -66,16 +71,16 @@ localparam [1:0]
 // Registro de estado actual y su valor combinacional "próximo estado"
 reg [1:0] state_reg, state_next;
 
-// Memoria de estado con reset y "clean" síncronos: ambos único que tocan
+// Memoria de estado con reset y "clean" síncronos: ambos únicos que tocan
 // state_reg directamente (todo lo demás se decide en el bloque combinacional).
 always @(posedge clk) begin
     if (reset) begin
         state_reg <= WAIT_A; // si hay reset, vuelvo al estado de espera para A
     end else if (tick_clean) begin
-        state_reg <= WAIT_A; // "clean": vuelvo a WAIT_A (y por lo tanto se apaga o_enable_alu)
-                              // sin resetear los reg_bank, que conservan A/B/OP
+        state_reg <= ENABLE; // "clean": salto directo a ENABLE reusando lo que
+                              // ya esté cargado en los reg_bank (no los toca)
     end else begin
-        state_reg <= state_next; // si no hay reset, paso al siguiente estado
+        state_reg <= state_next; // si no hay reset ni clean, paso al siguiente estado
     end
 end
 
@@ -86,7 +91,6 @@ end
 // automáticamente deshabilitadas sin código extra por estado.
 always @(*) begin
     state_next = state_reg; // por default, el siguiente estado es el mismo que el actual
-    //si todo sale bien, cuando llegue al enable, me quedo ahi hasta que haya un reset, y vuelvo al estado de espera para A
 
     // por default, no habilito ninguna salida
     o_enb_reg_A  = 1'b0;
@@ -115,8 +119,16 @@ always @(*) begin
             end
         end
         ENABLE: begin
-            // en el estado de habilitación, no hago nada, me quedo en este estado hasta que haya un reset (o un clean)
+            // en el estado de habilitación me quedo hasta que haya un reset;
+            // mientras tanto, cualquiera de los tres botones recarga solo su
+            // registro (reusando los otros dos) sin salir de ENABLE.
             o_enable_alu = 1'b1; // habilito la salida de la ALU
+            if (tick_a)
+                o_enb_reg_A = 1'b1;
+            if (tick_b)
+                o_enb_reg_B = 1'b1;
+            if (tick_op)
+                o_enb_reg_OP = 1'b1;
         end
         default: begin
             state_next = WAIT_A; // si por alguna razón el estado es inválido, vuelvo a WAIT_A
