@@ -1,9 +1,10 @@
 // Módulo de nivel superior para la Basys3: conecta switches y botones
 // físicos con la ALU, a través de los bancos de registros (A, B, Op) y la
-// máquina de estados que controla cuándo cargar cada uno.
+// lógica que controla cuándo cargar cada uno.
 //
-// Flujo: sw + btnL/btnC/btnR/btnU -> load_ctrl (antirrebote + FSM) ->
-// enables de carga -> reg_bank (A/B/Op) -> ALU -> led.
+// Flujo: sw + btnL/btnC/btnR -> load_ctrl (antirrebote + flags de carga) ->
+// enables de carga -> reg_bank (A/B/Op) -> ALU -> led. btnU (i_clean) queda
+// sin uso funcional, ver comentario en load_ctrl.v.
 module top #(
     parameter NB_DATA = 8, // Number of bits for the data inputs
     parameter NB_OP = 6, // Number of bits for the operation code
@@ -18,7 +19,7 @@ module top #(
     input wire btnL, //btn de control A
     input wire btnC, // btn de control B
     input wire btnR, // btn de control Op
-    input wire btnU, // btn de limpieza: vuelve a WAIT_A sin borrar los registros
+    input wire btnU, // sin uso funcional (ver comentario en load_ctrl.v)
     output wire [NB_LED-1:0] led
 );
 
@@ -29,8 +30,9 @@ wire alu_overflow, alu_carry;
 wire [NB_OP-1:0] reg_op_out;           // salida registrada del banco de Op
 wire enb_reg_A, enb_reg_B, enb_reg_OP; // pulsos de carga, uno por registro
 
-// Antirrebote de los 4 botones + FSM de secuenciación de la carga
-// (WAIT_A -> WAIT_B -> WAIT_OP -> ENABLE). Ver load_ctrl.v para el detalle.
+// Antirrebote de los 3 botones de carga + flags "sticky" que habilitan la
+// ALU una vez que A, B y Op fueron cargados (en cualquier orden). Ver
+// load_ctrl.v para el detalle.
 load_ctrl #(
     .N_DEBOUNCE(N_DEBOUNCE) // Number of bits for the debounce counter
 ) u_load_ctrl (

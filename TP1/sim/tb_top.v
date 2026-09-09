@@ -71,19 +71,6 @@ module tb_top;
         end
     end
 
-    function [8*8-1:0] state_name;
-        input [1:0] st;
-        begin
-            case (st)
-                2'b00:   state_name = "WAIT_A";
-                2'b01:   state_name = "WAIT_B";
-                2'b10:   state_name = "WAIT_OP";
-                2'b11:   state_name = "ENABLE";
-                default: state_name = "??????";
-            endcase
-        end
-    endfunction
-
     // -------------------- Tareas --------------------
 
     task do_reset;
@@ -229,13 +216,15 @@ module tb_top;
         bounce_press(BTN_A, 4, 5, 30);
         @(posedge clk);
         casos = casos + 1;
-        if (tick_a_count == 1 && dut.reg_a_out === 8'd42 && dut.u_load_ctrl.state_reg == 2'b01) begin
-            $display("[OK]    BOUNCE   4 rebotes filtrados, 1 solo tick_a, A=%0d, estado=%s",
-                dut.reg_a_out, state_name(dut.u_load_ctrl.state_reg));
+        if (tick_a_count == 1 && dut.reg_a_out === 8'd42 && dut.u_load_ctrl.loaded_a === 1'b1 &&
+            dut.u_load_ctrl.loaded_b === 1'b0 && dut.u_load_ctrl.loaded_op === 1'b0) begin
+            $display("[OK]    BOUNCE   4 rebotes filtrados, 1 solo tick_a, A=%0d, loaded_a=1 (b/op aun no)",
+                dut.reg_a_out);
         end else begin
             errores = errores + 1;
-            $display("[FALLO] BOUNCE   tick_a_count=%0d (esperado 1), A=%0d (esperado 42), estado=%s",
-                tick_a_count, dut.reg_a_out, state_name(dut.u_load_ctrl.state_reg));
+            $display("[FALLO] BOUNCE   tick_a_count=%0d (esperado 1), A=%0d (esperado 42), loaded=%b%b%b (esperado 100)",
+                tick_a_count, dut.reg_a_out,
+                dut.u_load_ctrl.loaded_a, dut.u_load_ctrl.loaded_b, dut.u_load_ctrl.loaded_op);
         end
 
         $display(" Probando que un pulso mas corto que el antirrebote NO dispare el tick");
@@ -252,79 +241,87 @@ module tb_top;
             $display("[FALLO] BOUNCE   pulso corto genero tick_a inesperadamente (count=%0d)", tick_a_count);
         end
 
-        // ---------------- Reset a mitad de la secuencia de carga ----------------
+        // ---------------- Reset a mitad de la carga (antes de completar B y OP) ----------------
         $display("--------------------------------------------------------");
-        $display(" Probando reset a mitad de la secuencia de carga (antes de completar B y OP)");
+        $display(" Probando reset a mitad de la carga (antes de completar B y OP)");
         do_reset;
         sw = 8'd5;
-        press_clean(BTN_A, 25); // cargo A, quedo en WAIT_B
+        press_clean(BTN_A, 25); // cargo solo A
         casos = casos + 1;
-        if (dut.u_load_ctrl.state_reg == 2'b01) begin
-            $display("[OK]    MIDSEQ   tras cargar A, estado=%s", state_name(dut.u_load_ctrl.state_reg));
+        if (dut.u_load_ctrl.loaded_a === 1'b1 && dut.u_load_ctrl.loaded_b === 1'b0 &&
+            dut.u_load_ctrl.loaded_op === 1'b0 && led == {NB_LED{1'b0}}) begin
+            $display("[OK]    MIDSEQ   tras cargar solo A, loaded=100 y ALU sigue deshabilitada (led=0)");
         end else begin
             errores = errores + 1;
-            $display("[FALLO] MIDSEQ   estado inesperado tras cargar A: %s", state_name(dut.u_load_ctrl.state_reg));
+            $display("[FALLO] MIDSEQ   loaded=%b%b%b led=%b (esperado 100 y led=0)",
+                dut.u_load_ctrl.loaded_a, dut.u_load_ctrl.loaded_b, dut.u_load_ctrl.loaded_op, led);
         end
 
         do_reset; // interrumpo antes de cargar B
         casos = casos + 1;
-        if (dut.u_load_ctrl.state_reg == 2'b00 && led == {NB_LED{1'b0}}) begin
-            $display("[OK]    MIDSEQ   reset a mitad de secuencia vuelve a WAIT_A y led=0");
+        if (dut.u_load_ctrl.loaded_a === 1'b0 && dut.u_load_ctrl.loaded_b === 1'b0 &&
+            dut.u_load_ctrl.loaded_op === 1'b0 && led == {NB_LED{1'b0}}) begin
+            $display("[OK]    MIDSEQ   reset a mitad de carga limpia los 3 flags (loaded=000) y led=0");
         end else begin
             errores = errores + 1;
-            $display("[FALLO] MIDSEQ   tras reset, estado=%s led=%b (esperado WAIT_A y led=0)",
-                state_name(dut.u_load_ctrl.state_reg), led);
+            $display("[FALLO] MIDSEQ   tras reset, loaded=%b%b%b led=%b (esperado 000 y led=0)",
+                dut.u_load_ctrl.loaded_a, dut.u_load_ctrl.loaded_b, dut.u_load_ctrl.loaded_op, led);
         end
 
-        // ---------------- "clean" (btnU): vuelve a WAIT_A sin borrar A/B/OP ----------------
+        // ---------------- Orden libre de carga + habilitacion permanente ----------------
         $display("--------------------------------------------------------");
-        $display(" Probando el boton de limpieza (clean): no debe borrar A/B/OP ya cargados");
+        $display(" Probando orden libre de carga (OP -> B -> A) y habilitacion permanente");
         do_reset;
-        sw = 8'sd15;
-        press_clean(BTN_A, 25);
-        sw = 8'sd5;
-        press_clean(BTN_B, 25);
         sw = ADD;
-        press_clean(BTN_OP, 25);
+        press_clean(BTN_OP, 25); // cargo OP primero
+        sw = 8'sd5;
+        press_clean(BTN_B, 25);  // despues B
+        casos = casos + 1;
+        if (dut.u_load_ctrl.o_enable_alu === 1'b0) begin
+            $display("[OK]    FREEORDER ALU sigue deshabilitada con solo OP y B cargados (falta A)");
+        end else begin
+            errores = errores + 1;
+            $display("[FALLO] FREEORDER ALU se habilito antes de tiempo (todavia faltaba A)");
+        end
+
+        sw = 8'sd15;
+        press_clean(BTN_A, 25);  // por ultimo A: recien ahi se habilita
         @(posedge clk);
         casos = casos + 1;
-        if (dut.u_load_ctrl.state_reg == 2'b11 && led[NB_DATA-1:0] === 8'd20) begin
-            $display("[OK]    CLEAN-PRE  15+5=%0d cargado y habilitado antes de limpiar", led[NB_DATA-1:0]);
+        if (dut.u_load_ctrl.o_enable_alu === 1'b1 && led[NB_DATA-1:0] === 8'd20) begin
+            $display("[OK]    FREEORDER cargando en orden OP,B,A igual habilita: 15+5=%0d", led[NB_DATA-1:0]);
         end else begin
             errores = errores + 1;
-            $display("[FALLO] CLEAN-PRE  estado=%s result=0x%0h (esperado ENABLE, 20)",
-                state_name(dut.u_load_ctrl.state_reg), led[NB_DATA-1:0]);
+            $display("[FALLO] FREEORDER enable=%b result=0x%0h (esperado enable=1, 20)",
+                dut.u_load_ctrl.o_enable_alu, led[NB_DATA-1:0]);
         end
 
-        // Presiono "clean" (btnU) sin pasar por reset
-        press_clean(BTN_CLEAN, 25);
-        casos = casos + 1;
-        if (dut.u_load_ctrl.state_reg == 2'b00 && led == {NB_LED{1'b0}} &&
-            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5 && dut.reg_op_out === ADD) begin
-            $display("[OK]    CLEAN    vuelve a WAIT_A, led=0, pero A=%0d B=%0d OP=%b siguen intactos",
-                dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
-        end else begin
-            errores = errores + 1;
-            $display("[FALLO] CLEAN    estado=%s led=%b A=%0d B=%0d OP=%b (esperado WAIT_A, led=0, A=15 B=5 OP=ADD intactos)",
-                state_name(dut.u_load_ctrl.state_reg), led, dut.reg_a_out, dut.reg_b_out, dut.reg_op_out);
-        end
-
-        // Nueva operacion reutilizando los mismos A y B (solo cambio OP a SUB).
-        // La FSM igual exige volver a confirmar cada etapa; lo que "clean" evita
-        // es que reg_bank haya perdido los valores viejos mientras tanto.
-        sw = 8'sd15;
-        press_clean(BTN_A, 25);
-        sw = 8'sd5;
-        press_clean(BTN_B, 25);
+        // Cambio SOLO la operacion (a SUB) sin tocar los switches de A/B: la
+        // habilitacion es "pegajosa" (queda en 1 hasta el proximo reset), asi
+        // que solo se recarga OP y se reusan A/B que ya estaban cargados.
         sw = SUB;
         press_clean(BTN_OP, 25);
         @(posedge clk);
         casos = casos + 1;
-        if (led[NB_DATA-1:0] === 8'd10) begin // 15-5=10
-            $display("[OK]    CLEAN-POST tras clean, nueva operacion SUB reutilizando A/B: 15-5=%0d", led[NB_DATA-1:0]);
+        if (dut.u_load_ctrl.o_enable_alu === 1'b1 && led[NB_DATA-1:0] === 8'd10 &&
+            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5) begin // 15-5=10
+            $display("[OK]    REUSE     solo cambie OP a SUB reutilizando A/B ya cargados: 15-5=%0d", led[NB_DATA-1:0]);
         end else begin
             errores = errores + 1;
-            $display("[FALLO] CLEAN-POST resultado=0x%0h (esperado 10)", led[NB_DATA-1:0]);
+            $display("[FALLO] REUSE     enable=%b result=0x%0h A=%0d B=%0d (esperado enable=1, 10, A=15 B=5)",
+                dut.u_load_ctrl.o_enable_alu, led[NB_DATA-1:0], dut.reg_a_out, dut.reg_b_out);
+        end
+
+        // i_clean (btnU) quedo sin efecto funcional en este diseño: presionarlo
+        // no debe alterar nada (ver comentario en load_ctrl.v).
+        press_clean(BTN_CLEAN, 25);
+        casos = casos + 1;
+        if (dut.u_load_ctrl.o_enable_alu === 1'b1 && led[NB_DATA-1:0] === 8'd10 &&
+            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5) begin
+            $display("[OK]    CLEAN-NOOP btnU ya no tiene efecto funcional, estado sin cambios");
+        end else begin
+            errores = errores + 1;
+            $display("[FALLO] CLEAN-NOOP btnU altero el estado inesperadamente");
         end
 
         $display("========================================================");
