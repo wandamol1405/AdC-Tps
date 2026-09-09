@@ -18,7 +18,6 @@ module tb_top;
     localparam BTN_A     = 0; // btnL
     localparam BTN_B     = 1; // btnC
     localparam BTN_OP    = 2; // btnR
-    localparam BTN_CLEAN = 3; // btnU
 
     // Opcodes (deben coincidir con los definidos en ALU.v)
     localparam [NB_OP-1:0] ADD    = 6'b100000;
@@ -30,7 +29,7 @@ module tb_top;
     reg                 clk;
     reg                 reset;
     reg  [NB_SW-1:0]    sw;
-    reg                 btnL, btnC, btnR, btnU;
+    reg                 btnL, btnC, btnR;
     wire [NB_LED-1:0]   led;
 
     integer casos, errores; // contadores del resumen final autochequeado
@@ -48,7 +47,6 @@ module tb_top;
         .btnL(btnL),
         .btnC(btnC),
         .btnR(btnR),
-        .btnU(btnU),
         .led(led)
     );
 
@@ -76,7 +74,7 @@ module tb_top;
     task do_reset;
         begin
             reset = 1'b1;
-            btnL = 1'b0; btnC = 1'b0; btnR = 1'b0; btnU = 1'b0; sw = {NB_SW{1'b0}};
+            btnL = 1'b0; btnC = 1'b0; btnR = 1'b0; sw = {NB_SW{1'b0}};
             repeat (3) @(posedge clk);
             reset = 1'b0;
             @(posedge clk);
@@ -91,14 +89,13 @@ module tb_top;
     // verdad durante la espera; por eso se referencian los regs del testbench
     // directamente a traves de este selector.
     task set_btn;
-        input integer which; // 0=A(btnL), 1=B(btnC), 2=OP(btnR), 3=CLEAN(btnU)
+        input integer which; // 0=A(btnL), 1=B(btnC), 2=OP(btnR)
         input value;
         begin
             case (which)
                 0: btnL = value;
                 1: btnC = value;
                 2: btnR = value;
-                3: btnU = value;
             endcase
         end
     endtask
@@ -310,18 +307,6 @@ module tb_top;
             errores = errores + 1;
             $display("[FALLO] REUSE     enable=%b result=0x%0h A=%0d B=%0d (esperado enable=1, 10, A=15 B=5)",
                 dut.u_load_ctrl.o_enable_alu, led[NB_DATA-1:0], dut.reg_a_out, dut.reg_b_out);
-        end
-
-        // i_clean (btnU) quedo sin efecto funcional en este diseño: presionarlo
-        // no debe alterar nada (ver comentario en load_ctrl.v).
-        press_clean(BTN_CLEAN, 25);
-        casos = casos + 1;
-        if (dut.u_load_ctrl.o_enable_alu === 1'b1 && led[NB_DATA-1:0] === 8'd10 &&
-            dut.reg_a_out === 8'd15 && dut.reg_b_out === 8'd5) begin
-            $display("[OK]    CLEAN-NOOP btnU ya no tiene efecto funcional, estado sin cambios");
-        end else begin
-            errores = errores + 1;
-            $display("[FALLO] CLEAN-NOOP btnU altero el estado inesperadamente");
         end
 
         $display("========================================================");

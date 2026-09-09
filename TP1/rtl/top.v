@@ -3,8 +3,7 @@
 // lógica que controla cuándo cargar cada uno.
 //
 // Flujo: sw + btnL/btnC/btnR -> load_ctrl (antirrebote + flags de carga) ->
-// enables de carga -> reg_bank (A/B/Op) -> ALU -> led. btnU (i_clean) queda
-// sin uso funcional, ver comentario en load_ctrl.v.
+// enables de carga -> reg_bank (A/B/Op) -> ALU -> led.
 module top #(
     parameter NB_DATA = 8, // Number of bits for the data inputs
     parameter NB_OP = 6, // Number of bits for the operation code
@@ -19,7 +18,6 @@ module top #(
     input wire btnL, //btn de control A
     input wire btnC, // btn de control B
     input wire btnR, // btn de control Op
-    input wire btnU, // sin uso funcional (ver comentario en load_ctrl.v)
     output wire [NB_LED-1:0] led
 );
 
@@ -39,7 +37,6 @@ load_ctrl #(
     .i_a(btnL),
     .i_b(btnC),
     .i_OP(btnR),
-    .i_clean(btnU),
     .clk(clk),
     .reset(reset),
     .o_enb_reg_A(enb_reg_A),
