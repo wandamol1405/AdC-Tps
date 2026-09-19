@@ -68,6 +68,9 @@ module tb_uart_tx;
             @(negedge clk);
             tx_start = 1'b0;
             d_in = ~tx_byte;
+            // Permite que el DUT actualice state_reg despues del flanco de
+            // clock que acepto tx_start antes de comenzar a observar tx.
+            #1;
         end
     endtask
 
@@ -90,6 +93,7 @@ module tb_uart_tx;
                 // La FSM actualiza sus registros al terminar el ciclo alto
                 // de i_tick; asi el siguiente campo se observa ya estable.
                 @(negedge i_tick);
+                #1;
             end
         end
     endtask
