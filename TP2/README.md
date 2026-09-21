@@ -208,120 +208,96 @@ flowchart LR
     CLRFLAG --> FLAG
 ```
 
-## Módulos nuevos propuestos (en discusión)
+## Módulos nuevos a agregar
 
-Sección de trabajo, todavía **sin decidir del todo** — para revisar entre las dos antes de escribir RTL. Objetivo: no sumar más módulos de los necesarios, y no perder la interfaz física de la Basys3 (switches/botones) que TP1 ya tiene validada.
+**Decidido**: 4 módulos nuevos, sin fusionar, **sin capa `uart.v`** — `interface_rx.v`/`interface_tx.v` se conectan directo a `uart_rx.v`/`uart_tx.v`, sin ningún wrapper intermedio. Cada uno tiene su propia sub-issue. El wiring final (instanciar los 4 + `load_ctrl.v`/`reg_bank.v`/`ALU.v` de TP1, mux switches/UART, constraints `.xdc`) queda aparte, todavía sin issue propia.
 
-**Fuera de este alcance:** la GUI en Python no es RTL — no agrega módulos ni complejidad a la arquitectura digital, solo es el software que arma los bytes `addr`+`valor` del lado de la PC. No aparece en la lista de abajo.
-
-### Los 3 bloques candidatos, y sus 2 posibles fusiones
+**Fuera de este alcance:** la GUI en Python no es RTL — no agrega módulos ni complejidad a la arquitectura digital, solo es el software que arma los bytes `addr`+`valor` del lado de la PC.
 
 ```mermaid
 flowchart TB
-    subgraph U["uart.v (nuevo) — periférico genérico, no sabe nada de ALU"]
-        direction LR
-        BRG[baud_rate_generator]
-        RXM[uart_rx]
-        TXM[uart_tx]
-        IFCRX["interface_circuit_rx.v (nuevo)\nflag + buffer"]
-        IFCTX["interface_circuit_tx.v (nuevo)\nflag simple"]
-        BRG -.s_tick.-> RXM
-        BRG -.s_tick.-> TXM
-        RXM --> IFCRX
-        IFCTX --> TXM
-    end
+    BRG[baud_rate_generator] -.s_tick.-> RXM[uart_rx]
+    BRG -.s_tick.-> TXM[uart_tx]
 
-    subgraph B["¿loader.v + result_sender.v, o 1 solo módulo? — sabe de A/B/Op/resultado"]
-        direction LR
-        LOADER["loader.v (nuevo)"]
-        SENDER["result_sender.v (nuevo)"]
-    end
+    RXM --> IFCRX["interface_rx.v (nuevo)\nflag + buffer"]
+    IFCTX["interface_tx.v (nuevo)\nflag simple"] --> TXM
 
-    IFCRX -- "r_data, rx_empty" --> LOADER
+    IFCRX -- "r_data, rx_empty" --> LOADER["loader_uart.v (nuevo)"]
     LOADER -- rd --> IFCRX
-    SENDER -- "w_data, wr" --> IFCTX
+    SENDER["result_sender.v (nuevo)"] -- "w_data, wr" --> IFCTX
     IFCTX -- tx_full --> SENDER
 
-    LOADER -- "o_enb_reg_A/B/OP\no_enable_alu" --> MUX{{"mux switches/UART\n(en el top de integración,\nNO es módulo nuevo)"}}
-    LC["load_ctrl.v (TP1, sin cambios)"] -- "enb_reg_A/B/OP\nalu_enable" --> MUX
+    LOADER -- "o_enb_reg_A/B/OP" --> MUX{{"mux switches/UART + sticky unificado\n(wiring final, NO es módulo nuevo)"}}
+    LC["load_ctrl.v (TP1, sin cambios)"] -- "enb_reg_A/B/OP" --> MUX
+    MUX -- "i_enable_alu" --> SENDER
     MUX --> RB["reg_bank x3 (TP1, sin cambios)"]
     RB --> ALU["ALU.v (TP1, sin cambios)"]
     ALU -- "o_result, o_overflow, o_carry" --> SENDER
 ```
 
-El mux preserva la interfaz física de TP1: `load_ctrl.v` (switches/botones) y `loader.v` (UART) quedan como dos fuentes hermanas compitiendo por los mismos `reg_bank`, ninguna reemplaza a la otra — se puede seguir usando la FPGA a mano exactamente como en TP1.
+El mux preserva la interfaz física de TP1: `load_ctrl.v` (switches/botones) y `loader_uart.v` (UART) quedan como dos fuentes hermanas compitiendo por los mismos `reg_bank`, ninguna reemplaza a la otra — se puede seguir usando la FPGA a mano exactamente como en TP1. Ojo con el enable: tiene que ser un solo sticky unificado en el wiring final (seteado por *cualquiera* de las dos fuentes por campo), no un OR de dos sticky ya calculados por separado — si no, una carga mixta (ej. A por switch, B y Op por UART) nunca habilita la ALU.
 
-### 1. `interface_circuit_rx.v`
+### 1. `interface_rx.v`
 
-Genérico, no conoce A/B/Op — es la implementación del esquema *flag FF + buffer* ya decidido más arriba.
+Genérico, no conoce A/B/Op — esquema *flag FF + buffer* (sección [Camino Rx → ALU](#camino-rx--alu-flag-ff--buffer-de-una-palabra) más arriba). Se conecta directo a `uart_rx.v`.
 
 | Puerto | Dirección | Descripción |
 |---|---|---|
 | `clk`, `reset` | in | — |
-| `i_rx_data[7:0]` | in | `o_data` de `uart_rx` |
-| `i_rx_done_tick` | in | `o_done_tick` de `uart_rx` (`set_flag`) |
-| `i_rd` | in | pulso de 1 ciclo: "ya leí el dato" (`clr_flag`), lo maneja `loader.v` |
+| `i_rx_data[7:0]` | in | `o_data` de `uart_rx.v` |
+| `i_rx_done_tick` | in | `o_done_tick` de `uart_rx.v` (`set_flag`) |
+| `i_rd` | in | pulso de 1 ciclo: "ya leí el dato" (`clr_flag`), lo maneja `loader_uart.v` |
 | `o_r_data[7:0]` | out | dato bufferizado |
 | `o_rx_empty` | out | `~flag_reg` |
 
 Estructura interna: 1 registro de 8 bits (buffer) + 1 flip-flop (flag). Sin FSM propiamente dicha — es el módulo `flag_buf` del libro, casi sin lógica de próximo estado más allá del set/clear del flag.
 
-### 2. `interface_circuit_tx.v`
+### 2. `interface_tx.v`
 
-Simétrico, esquema *flag FF simple*.
+Simétrico, esquema *flag FF simple*. Se conecta directo a `uart_tx.v`.
 
 | Puerto | Dirección | Descripción |
 |---|---|---|
 | `clk`, `reset` | in | — |
 | `i_w_data[7:0]` | in | dato a transmitir |
 | `i_wr` | in | pulso de 1 ciclo: "quiero transmitir esto" (`set_flag`), lo maneja `result_sender.v` |
-| `i_tx_done` | in | de `uart_tx` (`clr_flag`) |
+| `i_tx_done` | in | de `uart_tx.v` (`clr_flag`) |
 | `o_tx_full` | out | `flag_reg` |
-| `o_d_in[7:0]` | out | hacia `d_in` de `uart_tx` |
-| `o_tx_start` | out | hacia `tx_start` de `uart_tx` (nivel, se mantiene en 1 mientras `flag_reg`; `uart_tx` lo captura solo cuando está en `IDLE`) |
+| `o_d_in[7:0]` | out | hacia `d_in` de `uart_tx.v` |
+| `o_tx_start` | out | hacia `tx_start` de `uart_tx.v` (nivel, se mantiene en 1 mientras `flag_reg`; `uart_tx.v` lo captura solo cuando está en `IDLE`) |
 
 Misma complejidad que (1): 1 registro + 1 flip-flop, sin FSM propia.
 
-**Candidato a fusión con (1)**: ambos son del mismo tamaño/complejidad y la consigna ya los agrupa como un único "Interface Circuit" (sección 7) — se podrían escribir como un solo `interface_circuit.v` con dos bloques independientes (lectura y escritura) que no se pisan entre sí.
-
-### 3. `uart.v`
-
-Solo instanciación/wiring, cero lógica propia — junta `baud_rate_generator` + `uart_rx` + `uart_tx` + `interface_circuit_rx` + `interface_circuit_tx`. Hacia afuera expone únicamente `r_data`/`rd`/`rx_empty` + `w_data`/`wr`/`tx_full` + `rx`/`tx` físicos — el mismo límite que describe la consigna y el que usa el libro de referencia para su propio `uart.v`. Es el único módulo de este grupo que no tiene ninguna fusión posible (agrupa a los otros dos, no puede fusionarse con ellos sin perder la separación "genérico" vs. "sabe de ALU").
-
-### 4. `loader.v`
+### 3. `loader_uart.v`
 
 FSM `addr`+`valor` con flags sticky — ya documentado en detalle en [Protocolo de direccionamiento](#protocolo-de-direccionamiento-comando-dirección--valor-2-bytes) y [Enable de la ALU](#enable-de-la-alu-se-replica-el-patrón-sticky-de-load_ctrlv-no-se-instancia-tal-cual) más arriba.
 
 | Puerto | Dirección | Descripción |
 |---|---|---|
 | `clk`, `reset` | in | — |
-| `i_r_data[7:0]`, `i_rx_empty` | in | de `interface_circuit_rx.v` (vía `uart.v`) |
-| `o_rd` | out | pulso de 1 ciclo hacia `interface_circuit_rx.v` |
+| `i_r_data[7:0]`, `i_rx_empty` | in | de `interface_rx.v` |
+| `o_rd` | out | pulso de 1 ciclo hacia `interface_rx.v` |
 | `o_enb_reg_A`, `o_enb_reg_B`, `o_enb_reg_OP` | out | pulsos de 1 ciclo (al mux, junto con los de `load_ctrl.v`) |
-| `o_enable_alu` | out | sticky, al mux |
 
-`i_data` de los `reg_bank` no pasa por `loader.v`: se muxea directo entre `sw` e `i_r_data`, seleccionado por cuál de los dos enables (`load_ctrl` o `loader`) está pulsando.
+No expone `o_enable_alu` propio: ese enable sale unificado del mux del wiring final (ver nota de arriba), no de este módulo. `i_data` de los `reg_bank` tampoco pasa por acá: se muxea directo entre `sw` e `i_r_data`, seleccionado por cuál de los dos enables (`load_ctrl` o `loader_uart`) está pulsando.
 
-### 5. `result_sender.v`
+### 4. `result_sender.v`
 
-El menos definido de los 5 — falta cerrar el pendiente de [cuándo se dispara el envío](#pendiente--próximos-pasos) (¿automático al cambiar `o_result`, o a pedido explícito de la GUI?) y cómo se empaquetan `o_result` (8 bits) + `o_overflow` + `o_carry` (2 bits) en el/los byte(s) a transmitir (¿1 byte de resultado + 1 byte de flags, o se pierden overflow/carry?).
+**Decidido:** el envío se dispara automáticamente al cambiar `{o_result, o_overflow, o_carry}` (no hay comando explícito de lectura desde la GUI), y `o_overflow`/`o_carry` van en un byte de status separado del byte de resultado — 2 bytes por envío, nada se pierde:
+
+- byte 1 = `o_result[7:0]`
+- byte 2 = status = `{6'b0, o_overflow, o_carry}`
+
+Como hay que mandar 2 bytes en secuencia por un único puerto `w_data`/`wr` (con backpressure de `tx_full`), necesita una FSM chica de 3 estados: `IDLE` (detecta el cambio, solo cuando `i_enable_alu=1`) → `SEND_RESULT` (`wr`+`w_data=result`, espera a que `tx_full` baje) → `SEND_STATUS` (`wr`+`w_data=status`, espera a que `tx_full` baje) → vuelve a `IDLE`. Con `default` de recuperación a `IDLE`, como el resto de las FSMs del diseño.
 
 | Puerto | Dirección | Descripción |
 |---|---|---|
 | `clk`, `reset` | in | — |
 | `i_result[7:0]`, `i_overflow`, `i_carry` | in | de `ALU.v` |
-| `i_tx_full` | in | de `interface_circuit_tx.v` |
-| `o_w_data[7:0]` | out | hacia `interface_circuit_tx.v` |
-| `o_wr` | out | pulso, hacia `interface_circuit_tx.v` |
-
-**Candidato a fusión con (4)**: `loader.v` y `result_sender.v` son los dos únicos módulos que conocen el significado de A/B/Op/resultado (a diferencia de `interface_circuit_rx/tx.v`, que son genéricos a nivel de byte) — se podrían fusionar en un solo módulo "puente ALU↔UART" (ej. `alu_uart_bridge.v`).
-
-### Cantidad de módulos nuevos, según qué se fusione
-
-| Escenario | Archivos nuevos |
-|---|---|
-| Sin fusionar nada | `interface_circuit_rx.v`, `interface_circuit_tx.v`, `uart.v`, `loader.v`, `result_sender.v` + el `top.v` de integración → **6 archivos** |
-| Fusionando las 2 candidatas | `interface_circuit.v`, `uart.v`, `alu_uart_bridge.v` + el `top.v` de integración → **4 archivos** |
+| `i_enable_alu` | in | del mux del wiring final (gatea el envío: no manda nada hasta que A/B/Op se cargaron alguna vez) |
+| `i_tx_full` | in | de `interface_tx.v` |
+| `o_w_data[7:0]` | out | hacia `interface_tx.v` |
+| `o_wr` | out | pulso, hacia `interface_tx.v` |
 
 ## Verificación
 
@@ -339,10 +315,9 @@ iverilog -o /tmp/tb.vvp sim/tb_uart_tx.v rtl/uart_tx.v && vvp /tmp/tb.vvp
 
 ## Pendiente / Próximos pasos
 
-1. Implementar el Interface Circuit RX (`flag FF + buffer`, señales `r_data`/`rd`/`rx_empty`).
-2. Implementar el Interface Circuit TX (`flag FF` simple, señales `w_data`/`wr`/`tx_full`).
-3. Implementar el Loader / Register Router (FSM `WAIT_CMD`/`WAIT_VALUE`, mapeo de direcciones `0x01`-`0x03`, flags sticky que replican `load_ctrl.v`, reutilizando `reg_bank.v` de TP1 tal cual).
-4. Decidir cómo se dispara el envío del resultado por TX: como la ALU queda "siempre viva" (recalcula `o_result` con cualquier recarga de A/B/Op), falta definir si el Interface Circuit TX transmite automáticamente cada vez que `o_enable_alu` pasa a 1 o cambia el resultado, o si la GUI tiene que pedirlo con un comando explícito de lectura.
-5. Armar `top.v` integrando `baud_rate_generator` + `uart_rx` + `uart_tx` + Interface Circuit + Loader + `ALU.v`/`reg_bank.v` de TP1 (mismo patrón de instanciación que el `top.v` de TP1, cambiando `load_ctrl.v` por el Loader UART).
-6. Testbench de integración (loopback Tx→Rx, y/o carga vía protocolo addr+valor end-to-end).
-7. GUI en Python (envío de pares `[addr, valor]` por puerto serie).
+1. Implementar `interface_rx.v` (`flag FF + buffer`, conectado directo a `uart_rx.v`) — sub-issue propia.
+2. Implementar `interface_tx.v` (`flag FF` simple, conectado directo a `uart_tx.v`) — sub-issue propia, en paralelo a la anterior.
+3. Implementar `loader_uart.v` (FSM `WAIT_CMD`/`WAIT_VALUE`, mapeo de direcciones `0x01`-`0x03`) — sub-issue propia, depende de (1).
+4. Implementar `result_sender.v` (FSM `IDLE`/`SEND_RESULT`/`SEND_STATUS`, envío automático al cambiar el resultado, status en byte separado) — sub-issue propia, depende de (2).
+5. Armar el wiring final (sin issue propia todavía): mux switches/UART + sticky unificado + `interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v`/`load_ctrl.v` de TP1, sin tocar estos últimos tres + constraints `.xdc` para los pines Rx/Tx físicos.
+6. GUI en Python (envío de pares `[addr, valor]` por puerto serie).
