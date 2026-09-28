@@ -26,7 +26,7 @@ flowchart LR
         TX["uart_tx"]
         IFCRX["Interface Circuit RX\n(flag FF + buffer)"]
         IFCTX["Interface Circuit TX\n(flag FF)"]
-        LOADER["Loader / Register Router\n(addr + value, flags sticky)"]
+        LOADER["Loader / Register Router\n(addr + value)"]
         REGBANK["reg_bank x3\n(A, B, Op) — de TP1, sin cambios"]
         ALU["ALU — de TP1, sin cambios"]
     end
@@ -37,7 +37,7 @@ flowchart LR
     RX -- "o_data, o_done_tick" --> IFCRX
     IFCRX -- "r_data, rx_empty" --> LOADER
     LOADER -- "o_enb_reg_A/B/OP + i_data" --> REGBANK
-    LOADER -- "o_enable_alu (sticky)" --> ALU
+    LOADER -. "o_enb_reg_* → sticky unificado (wiring final) → o_enable_alu" .-> ALU
     REGBANK --> ALU
     ALU -- "o_result" --> IFCTX
     IFCTX -- "d_in, tx_start" --> TX
@@ -45,8 +45,7 @@ flowchart LR
 
     classDef done fill:#2d6a4f,color:#fff,stroke:#1b4332;
     classDef pending fill:#7f5539,color:#fff,stroke:#5c3a1e,stroke-dasharray: 5 5;
-    class BRG,RX,TX,REGBANK,ALU done;
-    class IFCRX,IFCTX,LOADER pending;
+    class BRG,RX,TX,IFCRX,IFCTX,LOADER,REGBANK,ALU done;
 ```
 
 🟢 Verde = ya implementado y testeado · 🟤 Marrón punteado = decidido en diseño, todavía no escrito en código (ver [Pendiente](#pendiente--próximos-pasos)).
@@ -64,7 +63,7 @@ Esto es una simplificación importante para el diseño de la interfaz UART: como
 | `uart_tx.v` | ✅ Implementado | ✅ `tb_uart_tx.v` — pasa (ver nota en [Verificación](#verificación)) |
 | `interface_rx.v` (flag FF + buffer) | ✅ Implementado | ✅ `tb_interface_rx.v` — pasa |
 | `interface_tx.v` (flag FF simple) | ✅ Implementado | ✅ `tb_interface_tx.v` — pasa |
-| `loader_uart.v` (protocolo addr+valor, flags sticky) | 📋 Diseñado, no implementado | — |
+| `loader_uart.v` (protocolo addr+valor) | ✅ Implementado | ✅ `tb_loader_uart.v` — pasa |
 | `result_sender.v` (envío automático, byte de status) | 📋 Diseñado, no implementado | — |
 | `top.v` (integración con TP1) | ⛔ No iniciado | — |
 | GUI en Python | ⛔ No iniciado | — |
@@ -119,6 +118,16 @@ stateDiagram-v2
 ```
 
 `tx` es una salida registrada (`tx_reg`) para evitar glitches en el pin físico — esto introduce 1 ciclo de clock de latencia entre el cambio de estado interno y el reflejo en `tx`, que es la causa de las fallas del testbench (ver [Verificación](#verificación)).
+
+### `loader_uart.v`
+
+FSM de 2 estados (`WAIT_CMD` / `WAIT_VALUE`) que implementa el [protocolo de direccionamiento](#protocolo-de-direccionamiento-comando-dirección--valor-2-bytes) (`0x01`=Op, `0x02`=A, `0x03`=B). Misma estructura de 3 procesos que `uart_rx.v`/`uart_tx.v`:
+
+1. `always @(posedge clk)` — registro de estado y de la dirección recibida (`state_reg`, `addr_reg`).
+2. `always @(*)` — lógica de próximo estado: `state_next` y `addr_next`.
+3. `always @(*)` — lógica de salida: `o_rd` y `o_enb_reg_A/B/OP`.
+
+Las salidas son de tipo Mealy: `o_rd` y el `o_enb_reg_*` pulsan en el mismo ciclo en que `i_rx_empty=0`, así que el pulso de carga coincide con `i_r_data` = valor y `reg_bank` lo captura directo del bus de `interface_rx.v`. Con una dirección inválida el byte de valor se consume igual (`o_rd`) pero no se pulsa ningún enable, y la FSM vuelve a `WAIT_CMD` — se descarta la trama completa y no se desfasa la siguiente.
 
 ## Decisiones de diseño de la interfaz
 
@@ -188,7 +197,7 @@ El `reg_bank.v` de TP1 se reutiliza tal cual — su interfaz (`i_data`, `i_load_
 
 `load_ctrl.v` de TP1 no es reutilizable tal cual acá: internamente instancia un `debounce` por entrada, pensado para filtrar rebotes mecánicos de un botón físico durante varios ciclos. Los pulsos que arma el Loader al decodificar `addr`+`valor` ya llegan limpios y de 1 ciclo (no hay rebote que filtrar), así que pasarlos por un `debounce` solo agregaría una demora de `N_DEBOUNCE` ciclos innecesaria.
 
-Lo que sí se replica es el **patrón combinacional de flags sticky** de `load_ctrl.v` — 3 flags (`loaded_a`, `loaded_b`, `loaded_op`) que se levantan la primera vez que se pulsa el `o_enb_reg_*` correspondiente y solo bajan con `reset`, con `o_enable_alu = loaded_a & loaded_b & loaded_op`. El Loader del UART termina exponiendo exactamente las mismas 4 salidas que `load_ctrl.v` (`o_enb_reg_A`, `o_enb_reg_B`, `o_enb_reg_OP`, `o_enable_alu`), así que se conecta a `reg_bank`/`ALU` con el mismo patrón de instanciación que ya usa `top.v` de TP1 — solo cambia qué genera esos pulsos (decodificación de `addr` en vez de botones antirrebotados).
+Lo que sí se replica es el **patrón combinacional de flags sticky** de `load_ctrl.v` — 3 flags (`loaded_a`, `loaded_b`, `loaded_op`) que se levantan la primera vez que se pulsa el `o_enb_reg_*` correspondiente y solo bajan con `reset`, con `o_enable_alu = loaded_a & loaded_b & loaded_op`. Ese sticky **no vive dentro de `loader_uart.v`**: el Loader expone solo los pulsos `o_enb_reg_A/B/OP` en crudo, y los flags se calculan en el wiring final, unificados con los de `load_ctrl.v` (ver [Módulos nuevos a agregar](#módulos-nuevos-a-agregar)). Así una carga mixta (parte por switches, parte por UART) también habilita la ALU.
 
 ### Camino ALU → Tx: `flag FF simple` (sin buffer)
 
@@ -271,7 +280,7 @@ Misma complejidad que (1): 1 registro + 1 flip-flop, sin FSM propia.
 
 ### 3. `loader_uart.v`
 
-FSM `addr`+`valor` con flags sticky — ya documentado en detalle en [Protocolo de direccionamiento](#protocolo-de-direccionamiento-comando-dirección--valor-2-bytes) y [Enable de la ALU](#enable-de-la-alu-se-replica-el-patrón-sticky-de-load_ctrlv-no-se-instancia-tal-cual) más arriba.
+FSM `addr`+`valor` — ✅ implementado (ver [`loader_uart.v`](#loader_uartv) en Módulos implementados), protocolo documentado en detalle en [Protocolo de direccionamiento](#protocolo-de-direccionamiento-comando-dirección--valor-2-bytes) y [Enable de la ALU](#enable-de-la-alu-se-replica-el-patrón-sticky-de-load_ctrlv-no-se-instancia-tal-cual) más arriba.
 
 | Puerto | Dirección | Descripción |
 |---|---|---|
@@ -310,6 +319,7 @@ iverilog -o /tmp/tb.vvp sim/tb_uart_rx.v rtl/uart_rx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_uart_tx.v rtl/uart_tx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_interface_rx.v rtl/interface_rx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_interface_tx.v rtl/interface_tx.v && vvp /tmp/tb.vvp
+iverilog -o /tmp/tb.vvp sim/tb_loader_uart.v rtl/loader_uart.v && vvp /tmp/tb.vvp
 ```
 
 - **`tb_baud_rate_generator.v`**: ✅ **pasa** — los 16 intervalos entre ticks (sobremuestreo 16x) caen exactamente a los 325 ciclos de clock esperados.
@@ -317,12 +327,13 @@ iverilog -o /tmp/tb.vvp sim/tb_interface_tx.v rtl/interface_tx.v && vvp /tmp/tb.
 - **`tb_uart_tx.v`**: ✅ **pasa**. Una versión anterior de `uart_tx.v`/`tb_uart_tx.v` daba 12 errores por un desfasaje de 1 ciclo de clock entre el cambio de estado interno y el reflejo en la salida registrada `tx` (`tx_reg <= tx_next(state_reg)`, calculada a partir del estado *previo* a la transición — comportamiento típico de una FSM Moore con salida registrada). Ese fix ya estaba resuelto en la rama `dev-tp2` remota (no bajada todavía a la copia local en el momento de la primera verificación) y se incorporó acá vía merge; los 25 casos (2 tramas completas, bit a bit, más `tx_done`) pasan limpio.
 - **`tb_interface_rx.v`**: ✅ **pasa** — 13 casos (estado inicial, llegada de dato, persistencia mientras no se lee, lectura vía `i_rd`, segunda trama, reset con dato pendiente, coincidencia `i_rx_done_tick`/`i_rd` en el mismo ciclo, y overrun explícito verificando que el buffer se queda con el dato más reciente). La primera versión de `interface_rx.v` no compilaba (orden de `wire` en un puerto, y un `output reg` maneja con `assign`) y le faltaba el puerto `i_rd`/`clr_flag` por completo — corregido antes de escribir este testbench.
 - **`tb_interface_tx.v`**: ✅ **pasa** — 7 casos (estado inicial, carga de dato, inmunidad de `tx_full` mientras transmite, `tx_done` limpia el flag, segundo envío, reset a mitad de transmisión, coincidencia `i_wr`/`i_tx_done`).
+- **`tb_loader_uart.v`**: ✅ **pasa** — 13 chequeos en 9 casos, con un mock de `interface_rx` (buffer + flag): estado post-reset, carga de A/B/Op en distintos órdenes, direcciones inválidas (`0x07`, `0x00`, `0x04`) descartadas sin trabar la FSM, espera larga entre dirección y valor, reset en `WAIT_VALUE` y bytes back-to-back. Un monitor verifica en todos los ciclos que nunca hay más de un `o_enb_reg_*` activo, que ninguno dura más de 1 ciclo y que `o_rd`/enables solo se activan con dato disponible. La primera versión de `loader_uart.v` no compilaba (coma de más, salidas `wire` asignadas en `always` y con doble driver), tenía el mapeo de direcciones corrido (`0x00`-`0x02`) y pulsaba los enables durante todo `WAIT_VALUE` en vez de 1 ciclo — corregido antes de escribir este testbench.
 
 ## Pendiente / Próximos pasos
 
 1. ~~Implementar `interface_rx.v`~~ — hecho, `tb_interface_rx.v` pasa (13/13).
 2. ~~Implementar `interface_tx.v`~~ — hecho, `tb_interface_tx.v` pasa (7/7).
-3. Implementar `loader_uart.v` (FSM `WAIT_CMD`/`WAIT_VALUE`, mapeo de direcciones `0x01`-`0x03`) — sub-issue propia, depende de (1).
+3. ~~Implementar `loader_uart.v`~~ — hecho, `tb_loader_uart.v` pasa (13/13).
 4. Implementar `result_sender.v` (FSM `IDLE`/`SEND_RESULT`/`SEND_STATUS`, envío automático al cambiar el resultado, status en byte separado) — sub-issue propia, depende de (2).
 5. Armar el wiring final (sin issue propia todavía): mux switches/UART + sticky unificado + `interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v`/`load_ctrl.v` de TP1, sin tocar estos últimos tres + constraints `.xdc` para los pines Rx/Tx físicos.
 6. GUI en Python (envío de pares `[addr, valor]` por puerto serie).
