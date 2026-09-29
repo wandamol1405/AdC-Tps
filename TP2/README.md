@@ -62,9 +62,10 @@ Esto es una simplificación importante para el diseño de la interfaz UART: como
 | `baud_rate_generator.v` | ✅ Implementado | ✅ `tb_baud_rate_generator.v` — pasa |
 | `uart_rx.v` | ✅ Implementado | ✅ `tb_uart_rx.v` — pasa |
 | `uart_tx.v` | ✅ Implementado | ✅ `tb_uart_tx.v` — pasa (ver nota en [Verificación](#verificación)) |
-| Interface Circuit (RX: flag FF + buffer) | 📋 Diseñado, no implementado | — |
-| Interface Circuit (TX: flag FF simple) | 📋 Diseñado, no implementado | — |
-| Loader / Register Router (protocolo addr+valor, flags sticky) | 📋 Diseñado, no implementado | — |
+| `interface_rx.v` (flag FF + buffer) | ✅ Implementado | ✅ `tb_interface_rx.v` — pasa |
+| `interface_tx.v` (flag FF simple) | ✅ Implementado | ✅ `tb_interface_tx.v` — pasa |
+| `loader_uart.v` (protocolo addr+valor, flags sticky) | 📋 Diseñado, no implementado | — |
+| `result_sender.v` (envío automático, byte de status) | 📋 Diseñado, no implementado | — |
 | `top.v` (integración con TP1) | ⛔ No iniciado | — |
 | GUI en Python | ⛔ No iniciado | — |
 
@@ -307,16 +308,20 @@ Corridos con Icarus Verilog (`iverilog` + `vvp`) desde `TP2/`:
 iverilog -o /tmp/tb.vvp sim/tb_baud_rate_generator.v rtl/baud_rate_generator.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_uart_rx.v rtl/uart_rx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_uart_tx.v rtl/uart_tx.v && vvp /tmp/tb.vvp
+iverilog -o /tmp/tb.vvp sim/tb_interface_rx.v rtl/interface_rx.v && vvp /tmp/tb.vvp
+iverilog -o /tmp/tb.vvp sim/tb_interface_tx.v rtl/interface_tx.v && vvp /tmp/tb.vvp
 ```
 
 - **`tb_baud_rate_generator.v`**: ✅ **pasa** — los 16 intervalos entre ticks (sobremuestreo 16x) caen exactamente a los 325 ciclos de clock esperados.
 - **`tb_uart_rx.v`**: ✅ **pasa** — 2 tramas válidas (`0xA5`, `0x5A`) con `o_data`/`o_done_tick` correctos, y 1 caso de glitch en el start bit correctamente ignorado (falso start no dispara `o_done_tick`).
 - **`tb_uart_tx.v`**: ✅ **pasa**. Una versión anterior de `uart_tx.v`/`tb_uart_tx.v` daba 12 errores por un desfasaje de 1 ciclo de clock entre el cambio de estado interno y el reflejo en la salida registrada `tx` (`tx_reg <= tx_next(state_reg)`, calculada a partir del estado *previo* a la transición — comportamiento típico de una FSM Moore con salida registrada). Ese fix ya estaba resuelto en la rama `dev-tp2` remota (no bajada todavía a la copia local en el momento de la primera verificación) y se incorporó acá vía merge; los 25 casos (2 tramas completas, bit a bit, más `tx_done`) pasan limpio.
+- **`tb_interface_rx.v`**: ✅ **pasa** — 13 casos (estado inicial, llegada de dato, persistencia mientras no se lee, lectura vía `i_rd`, segunda trama, reset con dato pendiente, coincidencia `i_rx_done_tick`/`i_rd` en el mismo ciclo, y overrun explícito verificando que el buffer se queda con el dato más reciente). La primera versión de `interface_rx.v` no compilaba (orden de `wire` en un puerto, y un `output reg` maneja con `assign`) y le faltaba el puerto `i_rd`/`clr_flag` por completo — corregido antes de escribir este testbench.
+- **`tb_interface_tx.v`**: ✅ **pasa** — 7 casos (estado inicial, carga de dato, inmunidad de `tx_full` mientras transmite, `tx_done` limpia el flag, segundo envío, reset a mitad de transmisión, coincidencia `i_wr`/`i_tx_done`).
 
 ## Pendiente / Próximos pasos
 
-1. Implementar `interface_rx.v` (`flag FF + buffer`, conectado directo a `uart_rx.v`) — sub-issue propia.
-2. Implementar `interface_tx.v` (`flag FF` simple, conectado directo a `uart_tx.v`) — sub-issue propia, en paralelo a la anterior.
+1. ~~Implementar `interface_rx.v`~~ — hecho, `tb_interface_rx.v` pasa (13/13).
+2. ~~Implementar `interface_tx.v`~~ — hecho, `tb_interface_tx.v` pasa (7/7).
 3. Implementar `loader_uart.v` (FSM `WAIT_CMD`/`WAIT_VALUE`, mapeo de direcciones `0x01`-`0x03`) — sub-issue propia, depende de (1).
 4. Implementar `result_sender.v` (FSM `IDLE`/`SEND_RESULT`/`SEND_STATUS`, envío automático al cambiar el resultado, status en byte separado) — sub-issue propia, depende de (2).
 5. Armar el wiring final (sin issue propia todavía): mux switches/UART + sticky unificado + `interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v`/`load_ctrl.v` de TP1, sin tocar estos últimos tres + constraints `.xdc` para los pines Rx/Tx físicos.
