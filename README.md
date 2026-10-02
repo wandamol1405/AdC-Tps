@@ -8,7 +8,7 @@ Cada carpeta corresponde a un trabajo practico (TP) de la materia:
 
 - TP1: Implementación en FPGA (Basys3) de una ALU parametrizable, con un datapath de carga por switches/pulsadores y verificación por testbench autochequeado.
 
-- TP2:
+- TP2: Diseño en Verilog de una UART (Baud Rate Generator, Rx, Tx) integrada a la ALU de TP1, con carga de operandos vía un protocolo serie de comando+valor manejado desde una GUI en Python.
 
 ## Objetivo
 
