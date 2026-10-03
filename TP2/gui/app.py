@@ -36,6 +36,7 @@ from serial_link import RealSerialLink, list_ports
 MOCK_LABEL = "Mock (sin hardware)"
 POLL_MS = 50  # cada cuanto se revisa si llegaron bytes nuevos
 BAUD_DEFAULT = 19200
+DISPLAY_DEBOUNCE_MS = 200  # ver nota en _schedule_display_update
 
 
 class App:
@@ -47,6 +48,8 @@ class App:
         self._rx_buffer = bytearray()  # bytes de resultado que todavia no completan un par
         self._last_a = None  # ultimo A cargado con exito (0..255), para la vista en binario
         self._last_b = None  # idem para B
+        self._pending_display = None  # (result, overflow, carry) a mostrar cuando se asiente la rafaga
+        self._display_after_id = None  # id del after() pendiente del debounce
 
         self._build_ui()
         self._refresh_ports()
@@ -203,8 +206,15 @@ class App:
         if self.link is not None:
             self.link.close()
             self.link = None
+        self._cancel_pending_display()
         self._set_connected_state(False)
         self._log("Desconectado")
+
+    def _cancel_pending_display(self):
+        if self._display_after_id is not None:
+            self.root.after_cancel(self._display_after_id)
+            self._display_after_id = None
+        self._pending_display = None
 
     def _set_connected_state(self, connected):
         self.connect_btn.config(text="Desconectar" if connected else "Conectar")
@@ -275,6 +285,7 @@ class App:
             self.link.reset()
             self._last_a = None
             self._last_b = None
+            self._cancel_pending_display()
             self.result_label.config(text="Esperando datos...")
             self.bits_label.config(text="")
             self._set_flag_label(self.overflow_label, False)
@@ -311,10 +322,33 @@ class App:
             signed = to_signed8(result_byte)
             self._log(f"RX  resultado=0x{result_byte:02X} ({signed})  status=0x{status_byte:02X} (ov={int(overflow)} ca={int(carry)})")
 
-            self.result_label.config(text=f"Resultado: {signed}  (0x{result_byte:02X}, sin signo {result_byte})")
-            self._update_bits_view(result_byte)
-            self._set_flag_label(self.overflow_label, overflow)
-            self._set_flag_label(self.carry_label, carry)
+            # No actualizamos el panel grande al toque: como la ALU manda un
+            # resultado automático cada vez que CUALQUIER campo cambia (no
+            # hay comando EXEC), "Cargar los 3" en realidad manda 3 cargas
+            # separadas y puede generar 2-3 respuestas intermedias antes de
+            # la que corresponde a los 3 valores ya cargados. El log las
+            # muestra todas (arriba); acá sólo programamos mostrar en el
+            # panel grande la ÚLTIMA de la ráfaga, una vez que se asienta.
+            self._schedule_display_update(result_byte, overflow, carry)
+
+    def _schedule_display_update(self, result_byte, overflow, carry):
+        self._pending_display = (result_byte, overflow, carry)
+        if self._display_after_id is not None:
+            self.root.after_cancel(self._display_after_id)
+        self._display_after_id = self.root.after(DISPLAY_DEBOUNCE_MS, self._commit_display)
+
+    def _commit_display(self):
+        self._display_after_id = None
+        if self._pending_display is None:
+            return
+        result_byte, overflow, carry = self._pending_display
+        self._pending_display = None
+
+        signed = to_signed8(result_byte)
+        self.result_label.config(text=f"Resultado: {signed}  (0x{result_byte:02X}, sin signo {result_byte})")
+        self._update_bits_view(result_byte)
+        self._set_flag_label(self.overflow_label, overflow)
+        self._set_flag_label(self.carry_label, carry)
 
     def _update_bits_view(self, result_u8):
         """Alinea A, B y Resultado en binario, uno debajo del otro, para
