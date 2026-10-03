@@ -27,6 +27,7 @@ flowchart LR
         IFCRX["Interface Circuit RX\n(flag FF + buffer)"]
         IFCTX["Interface Circuit TX\n(flag FF)"]
         LOADER["Loader / Register Router\n(addr + value)"]
+        SENDER["result_sender\n(2 bytes: resultado + status)"]
         REGBANK["reg_bank x3\n(A, B, Op) — de TP1, sin cambios"]
         ALU["ALU — de TP1, sin cambios"]
     end
@@ -39,13 +40,14 @@ flowchart LR
     LOADER -- "o_enb_reg_A/B/OP + i_data" --> REGBANK
     LOADER -. "o_enb_reg_* → sticky unificado (wiring final) → o_enable_alu" .-> ALU
     REGBANK --> ALU
-    ALU -- "o_result" --> IFCTX
+    ALU -- "o_result, o_overflow, o_carry" --> SENDER
+    SENDER -- "w_data, wr" --> IFCTX
     IFCTX -- "d_in, tx_start" --> TX
     TX -- "tx (serie)" --> GUI
 
     classDef done fill:#2d6a4f,color:#fff,stroke:#1b4332;
     classDef pending fill:#7f5539,color:#fff,stroke:#5c3a1e,stroke-dasharray: 5 5;
-    class BRG,RX,TX,IFCRX,IFCTX,LOADER,REGBANK,ALU done;
+    class BRG,RX,TX,IFCRX,IFCTX,LOADER,SENDER,REGBANK,ALU done;
 ```
 
 🟢 Verde = ya implementado y testeado · 🟤 Marrón punteado = decidido en diseño, todavía no escrito en código (ver [Pendiente](#pendiente--próximos-pasos)).
@@ -64,7 +66,7 @@ Esto es una simplificación importante para el diseño de la interfaz UART: como
 | `interface_rx.v` (flag FF + buffer) | ✅ Implementado | ✅ `tb_interface_rx.v` — pasa |
 | `interface_tx.v` (flag FF simple) | ✅ Implementado | ✅ `tb_interface_tx.v` — pasa |
 | `loader_uart.v` (protocolo addr+valor) | ✅ Implementado | ✅ `tb_loader_uart.v` — pasa |
-| `result_sender.v` (envío automático, byte de status) | 📋 Diseñado, no implementado | — |
+| `result_sender.v` (envío automático, byte de status) | ✅ Implementado | ✅ `tb_result_sender.v` — pasa |
 | `top.v` (integración con TP1) | ⛔ No iniciado | — |
 | GUI en Python | ⛔ No iniciado | — |
 
@@ -128,6 +130,17 @@ FSM de 2 estados (`WAIT_CMD` / `WAIT_VALUE`) que implementa el [protocolo de dir
 3. `always @(*)` — lógica de salida: `o_rd` y `o_enb_reg_A/B/OP`.
 
 Las salidas son de tipo Mealy: `o_rd` y el `o_enb_reg_*` pulsan en el mismo ciclo en que `i_rx_empty=0`, así que el pulso de carga coincide con `i_r_data` = valor y `reg_bank` lo captura directo del bus de `interface_rx.v`. Con una dirección inválida el byte de valor se consume igual (`o_rd`) pero no se pulsa ningún enable, y la FSM vuelve a `WAIT_CMD` — se descarta la trama completa y no se desfasa la siguiente.
+
+### `result_sender.v`
+
+FSM de 3 estados (`IDLE` / `SEND_RESULT` / `SEND_STATUS`) que mira `{i_result, i_overflow, i_carry}` de la ALU y manda 2 bytes por `interface_tx.v` cada vez que cambia algo, con `i_enable_alu` como gate (no manda nada hasta que A/B/Op se cargaron alguna vez). Misma estructura de 3 procesos que el resto de las FSMs del diseño.
+
+Dos detalles de la implementación real que no estaban en el diseño original:
+
+- **Primer envío garantizado**: la condición para salir de `IDLE` es `i_enable_alu && (!sent_once || changed)`, no solo `changed`. Sin el `!sent_once`, si la ALU habilita con resultado `0x00` (que coincide con el valor inicial de la "foto" tras el reset), el módulo nunca mandaría nada — `sent_once` fuerza el primer envío sin importar el valor.
+- **"Foto" (snapshot)**: al salir de `IDLE` se copian `i_result`/status a `snap_result`/`snap_status`, y los 2 bytes se mandan desde esa copia, no desde las entradas en vivo. Esto evita que los 2 bytes queden desincronizados si la ALU cambia a mitad de la transmisión (ej. el usuario recarga B justo cuando se está mandando el byte de status del cálculo anterior) — los 2 bytes de un mismo envío siempre corresponden al mismo cálculo, y si hubo más cambios mientras se transmitía, se descartan los intermedios y se manda solo el último valor al volver a `IDLE`.
+
+El handshake con `interface_tx.v` nunca escribe con el buzón ocupado: `o_wr` se pulsa únicamente cuando `i_tx_full=0`, en el mismo ciclo en que se avanza de estado — igual que describe la sección de [Camino ALU → Tx](#camino-alu--tx-flag-ff-simple-sin-buffer) más abajo.
 
 ## Decisiones de diseño de la interfaz
 
@@ -220,7 +233,7 @@ flowchart LR
 
 ## Módulos nuevos a agregar
 
-**Decidido**: 4 módulos nuevos, sin fusionar, **sin capa `uart.v`** — `interface_rx.v`/`interface_tx.v` se conectan directo a `uart_rx.v`/`uart_tx.v`, sin ningún wrapper intermedio. Cada uno tiene su propia sub-issue. El wiring final (instanciar los 4 + `load_ctrl.v`/`reg_bank.v`/`ALU.v` de TP1, mux switches/UART, constraints `.xdc`) queda aparte, todavía sin issue propia.
+**Decidido y ya implementado**: 4 módulos nuevos, sin fusionar, **sin capa `uart.v`** — `interface_rx.v`/`interface_tx.v` se conectan directo a `uart_rx.v`/`uart_tx.v`, sin ningún wrapper intermedio. Cada uno tuvo su propia sub-issue (ver detalle y puertos reales en [Módulos implementados](#módulos-implementados)). Lo único que queda es el wiring final (instanciar los 4 + `load_ctrl.v`/`reg_bank.v`/`ALU.v` de TP1, mux switches/UART, constraints `.xdc`), todavía sin issue propia.
 
 **Fuera de este alcance:** la GUI en Python no es RTL — no agrega módulos ni complejidad a la arquitectura digital, solo es el software que arma los bytes `addr`+`valor` del lado de la PC.
 
@@ -293,7 +306,7 @@ No expone `o_enable_alu` propio: ese enable sale unificado del mux del wiring fi
 
 ### 4. `result_sender.v`
 
-**Decidido:** el envío se dispara automáticamente al cambiar `{o_result, o_overflow, o_carry}` (no hay comando explícito de lectura desde la GUI), y `o_overflow`/`o_carry` van en un byte de status separado del byte de resultado — 2 bytes por envío, nada se pierde:
+✅ implementado (ver [`result_sender.v`](#result_senderv) en Módulos implementados). El envío se dispara automáticamente al cambiar `{o_result, o_overflow, o_carry}` (no hay comando explícito de lectura desde la GUI), y `o_overflow`/`o_carry` van en un byte de status separado del byte de resultado — 2 bytes por envío, nada se pierde:
 
 - byte 1 = `o_result[7:0]`
 - byte 2 = status = `{6'b0, o_overflow, o_carry}`
@@ -320,6 +333,7 @@ iverilog -o /tmp/tb.vvp sim/tb_uart_tx.v rtl/uart_tx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_interface_rx.v rtl/interface_rx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_interface_tx.v rtl/interface_tx.v && vvp /tmp/tb.vvp
 iverilog -o /tmp/tb.vvp sim/tb_loader_uart.v rtl/loader_uart.v && vvp /tmp/tb.vvp
+iverilog -o /tmp/tb.vvp sim/tb_result_sender.v rtl/result_sender.v rtl/interface_tx.v rtl/uart_tx.v rtl/uart_rx.v && vvp /tmp/tb.vvp
 ```
 
 - **`tb_baud_rate_generator.v`**: ✅ **pasa** — los 16 intervalos entre ticks (sobremuestreo 16x) caen exactamente a los 325 ciclos de clock esperados.
@@ -328,12 +342,13 @@ iverilog -o /tmp/tb.vvp sim/tb_loader_uart.v rtl/loader_uart.v && vvp /tmp/tb.vv
 - **`tb_interface_rx.v`**: ✅ **pasa** — 13 casos (estado inicial, llegada de dato, persistencia mientras no se lee, lectura vía `i_rd`, segunda trama, reset con dato pendiente, coincidencia `i_rx_done_tick`/`i_rd` en el mismo ciclo, y overrun explícito verificando que el buffer se queda con el dato más reciente). La primera versión de `interface_rx.v` no compilaba (orden de `wire` en un puerto, y un `output reg` maneja con `assign`) y le faltaba el puerto `i_rd`/`clr_flag` por completo — corregido antes de escribir este testbench.
 - **`tb_interface_tx.v`**: ✅ **pasa** — 7 casos (estado inicial, carga de dato, inmunidad de `tx_full` mientras transmite, `tx_done` limpia el flag, segundo envío, reset a mitad de transmisión, coincidencia `i_wr`/`i_tx_done`).
 - **`tb_loader_uart.v`**: ✅ **pasa** — 13 chequeos en 9 casos, con un mock de `interface_rx` (buffer + flag): estado post-reset, carga de A/B/Op en distintos órdenes, direcciones inválidas (`0x07`, `0x00`, `0x04`) descartadas sin trabar la FSM, espera larga entre dirección y valor, reset en `WAIT_VALUE` y bytes back-to-back. Un monitor verifica en todos los ciclos que nunca hay más de un `o_enb_reg_*` activo, que ninguno dura más de 1 ciclo y que `o_rd`/enables solo se activan con dato disponible. La primera versión de `loader_uart.v` no compilaba (coma de más, salidas `wire` asignadas en `always` y con doble driver), tenía el mapeo de direcciones corrido (`0x00`-`0x02`) y pulsaba los enables durante todo `WAIT_VALUE` en vez de 1 ciclo — corregido antes de escribir este testbench.
+- **`tb_result_sender.v`**: ✅ **pasa** — 11 casos, pero a diferencia de los anteriores este testbench prueba la **cadena completa de salida real** (`result_sender` → `interface_tx` → `uart_tx` → `uart_rx`, con `uart_rx` haciendo de "PC" que decodifica lo que sale por el cable), no un mock. Cubre: `i_enable_alu=0` no manda nada, primer envío con resultado `0x00` (el caso que `!sent_once` resuelve), cambio de resultado, valor repetido (no reenvía), overflow/carry empaquetados en el byte de status, cambio de la ALU a mitad de un envío (la "foto" mantiene los 2 bytes consistentes), varios cambios intermedios durante la transmisión (se descartan, se manda solo el último), y reset a mitad de un envío. Un monitor verifica en todos los ciclos que `o_wr` nunca se pulsa con `i_tx_full=1`.
 
 ## Pendiente / Próximos pasos
 
 1. ~~Implementar `interface_rx.v`~~ — hecho, `tb_interface_rx.v` pasa (13/13).
 2. ~~Implementar `interface_tx.v`~~ — hecho, `tb_interface_tx.v` pasa (7/7).
 3. ~~Implementar `loader_uart.v`~~ — hecho, `tb_loader_uart.v` pasa (13/13).
-4. Implementar `result_sender.v` (FSM `IDLE`/`SEND_RESULT`/`SEND_STATUS`, envío automático al cambiar el resultado, status en byte separado) — sub-issue propia, depende de (2).
+4. ~~Implementar `result_sender.v`~~ — hecho, `tb_result_sender.v` pasa (11/11), probado en cadena completa hasta `uart_rx`.
 5. Armar el wiring final (sin issue propia todavía): mux switches/UART + sticky unificado + `interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v`/`load_ctrl.v` de TP1, sin tocar estos últimos tres + constraints `.xdc` para los pines Rx/Tx físicos.
 6. GUI en Python (envío de pares `[addr, valor]` por puerto serie).
