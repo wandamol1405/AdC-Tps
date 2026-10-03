@@ -67,8 +67,8 @@ Esto es una simplificación importante para el diseño de la interfaz UART: como
 | `interface_tx.v` (flag FF simple) | ✅ Implementado | ✅ `tb_interface_tx.v` — pasa |
 | `loader_uart.v` (protocolo addr+valor) | ✅ Implementado | ✅ `tb_loader_uart.v` — pasa |
 | `result_sender.v` (envío automático, byte de status) | ✅ Implementado | ✅ `tb_result_sender.v` — pasa |
-| `top.v` (integración con TP1) | ⛔ No iniciado | — |
-| GUI en Python | ⛔ No iniciado | — |
+| `top.v` (integración con TP1, 1ª versión solo UART) | 🔧 En curso | — |
+| GUI en Python (`TP2/gui/`) | ✅ Implementada | ✅ `test_mock_alu.py` + `test_protocol.py` — pasan |
 
 ## Módulos implementados
 
@@ -350,5 +350,5 @@ iverilog -o /tmp/tb.vvp sim/tb_result_sender.v rtl/result_sender.v rtl/interface
 2. ~~Implementar `interface_tx.v`~~ — hecho, `tb_interface_tx.v` pasa (7/7).
 3. ~~Implementar `loader_uart.v`~~ — hecho, `tb_loader_uart.v` pasa (13/13).
 4. ~~Implementar `result_sender.v`~~ — hecho, `tb_result_sender.v` pasa (11/11), probado en cadena completa hasta `uart_rx`.
-5. Armar el wiring final (sin issue propia todavía): mux switches/UART + sticky unificado + `interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v`/`load_ctrl.v` de TP1, sin tocar estos últimos tres + constraints `.xdc` para los pines Rx/Tx físicos.
-6. GUI en Python (envío de pares `[addr, valor]` por puerto serie).
+5. 🔧 En curso: wiring final, en una **primera versión simplificada sin `load_ctrl.v`** — solo carga por UART (`interface_rx.v`/`interface_tx.v`/`loader_uart.v`/`result_sender.v` + `ALU.v`/`reg_bank.v` de TP1), sin mux ni sticky unificado todavía. El mux switches/UART + `load_ctrl.v` + constraints `.xdc` para los pines Rx/Tx físicos quedan para una segunda etapa, una vez que esto funcione end-to-end.
+6. ✅ GUI en Python (`TP2/gui/`) — Tkinter, con un backend mock (`mock_fpga.py`) que simula la ALU para poder probar el protocolo sin esperar al wiring final. Ver [`TP2/gui/README.md`](gui/README.md).
