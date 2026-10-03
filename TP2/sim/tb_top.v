@@ -52,12 +52,22 @@ module tb_top;
     localparam [7:0] ADDR_A  = 8'h02;
     localparam [7:0] ADDR_B  = 8'h03;
 
+    // Antirrebote reducido solo para esta simulación (ver TP1/sim/tb_top.v):
+    // con N chico, 2^N ciclos alcanza para confirmar un flanco sin esperar
+    // los ~21 ms reales del antirrebote de hardware.
+    localparam N_DEBOUNCE_SIM = 4;
+    localparam BTN_A  = 0; // btnL
+    localparam BTN_B  = 1; // btnC
+    localparam BTN_OP = 2; // btnR
+
     // -------------------------------------------------------------------------
     // Señales
     // -------------------------------------------------------------------------
     reg         clk;
     reg         reset;
     reg         rx;
+    reg  [7:0]  sw;
+    reg         btnL, btnC, btnR;
     wire        tx;
     wire [10:0] led;
 
@@ -66,16 +76,50 @@ module tb_top;
     top #(
         .CLK_FREQ(CLK_FREQ),
         .BAUD_RATE(BAUD_RATE),
-        .OVERSAMPLE(OVERSAMPLE)
+        .OVERSAMPLE(OVERSAMPLE),
+        .N_DEBOUNCE(N_DEBOUNCE_SIM)
     ) dut (
         .clk(clk),
         .reset(reset),
         .rx(rx),
         .tx(tx),
+        .sw(sw),
+        .btnL(btnL),
+        .btnC(btnC),
+        .btnR(btnR),
         .led(led)
     );
 
     always #(CLK_NS / 2) clk = ~clk;
+
+    // -------------------------------------------------------------------------
+    // "Switches": presiona y suelta limpio (sin rebote), sosteniendo cada
+    // flanco el tiempo suficiente para que el antirrebote lo confirme.
+    // Igual que TP1/sim/tb_top.v: se referencian los regs directo (no por
+    // argumento inout) porque estas tareas esperan varios ciclos en el medio.
+    // -------------------------------------------------------------------------
+    task set_btn;
+        input integer which; // 0=A(btnL), 1=B(btnC), 2=OP(btnR)
+        input value;
+        begin
+            case (which)
+                0: btnL = value;
+                1: btnC = value;
+                2: btnR = value;
+            endcase
+        end
+    endtask
+
+    task press_clean;
+        input integer which;
+        input integer hold_cycles;
+        begin
+            set_btn(which, 1'b1);
+            repeat (hold_cycles) @(posedge clk);
+            set_btn(which, 1'b0);
+            repeat (hold_cycles) @(posedge clk);
+        end
+    endtask
 
     // -------------------------------------------------------------------------
     // "PC" transmitiendo: manda un byte por rx (LSB primero)
@@ -183,9 +227,13 @@ module tb_top;
         clk      = 0;
         reset    = 1;
         rx       = 1'b1; // Línea en reposo
+        sw       = 8'h00;
+        btnL     = 1'b0;
+        btnC     = 1'b0;
+        btnR     = 1'b0;
 
         $display("========================================================");
-        $display(" Testbench top TP2 (solo UART) - %0d baud, %0d ns por bit", BAUD_RATE, BIT_NS);
+        $display(" Testbench top TP2 (UART + switches) - %0d baud, %0d ns por bit, N_DEBOUNCE(sim)=%0d", BAUD_RATE, BIT_NS, N_DEBOUNCE_SIM);
         $display("========================================================");
 
         repeat (5) @(posedge clk);
@@ -307,6 +355,60 @@ module tb_top;
             end
             check_rx(rx_count - 2, 2, {8'h30, 8'h00, 16'h0}, "Caso 9c (ultima respuesta = cuenta final 0x10 + 0x20)");
         end
+
+        // ---------------------------------------------------------------------
+        // CASO 10: Cargar A por switch (btnL) con la ALU ya habilitada por
+        // UART (A=0x10, B=0x20, Op=ADD desde el Caso 9) -> recalcula solo
+        // -------------------------------------------------------------------
+        base = rx_count;
+        sw = 8'h05;
+        press_clean(BTN_A, 25); // > 2^N_DEBOUNCE_SIM ciclos: asegura confirmar el flanco
+        #(RESP_WAIT);
+        check_value(dut.reg_a_out, 8'h05, "Caso 10a (A cargado por switch)");
+        check_rx(base, 2, {8'h25, 8'h00, 16'h0}, "Caso 10b (0x05 + 0x20 = 0x25, por switch)");
+
+        // ---------------------------------------------------------------------
+        // CASO 11: Reset y carga MIXTA desde cero -- A por switch, B y Op por
+        // UART. Es el caso que motivó el enable sticky unificado: si cada
+        // fuente llevara su propio sticky por separado, esta combinación
+        // nunca habilitaría la ALU.
+        // -------------------------------------------------------------------
+        reset = 1;
+        repeat (3) @(posedge clk);
+        @(negedge clk);
+        reset = 0;
+        repeat (3) @(posedge clk);
+
+        check_value(led, 11'h0, "Caso 11a (post-reset: LEDs apagados)");
+        check_value({dut.loaded_a, dut.loaded_b, dut.loaded_op}, 3'b000, "Caso 11b (post-reset: ningun campo cargado)");
+
+        base = rx_count;
+        sw = 8'h0F;
+        press_clean(BTN_A, 25);
+        check_value(dut.reg_a_out, 8'h0F, "Caso 11c (A=0x0F por switch)");
+        check_value({dut.loaded_a, dut.loaded_b, dut.loaded_op}, 3'b100, "Caso 11d (solo loaded_a, todavia sin habilitar)");
+
+        send_cmd(ADDR_B, 8'h05);
+        #(RESP_WAIT);
+        check_value(dut.reg_b_out, 8'h05, "Caso 11e (B=0x05 por UART)");
+        check_value({dut.loaded_a, dut.loaded_b, dut.loaded_op}, 3'b110, "Caso 11f (A y B cargados, Op todavia no)");
+        check_rx(base, 0, 32'h0, "Caso 11g (sin Op: no responde)");
+
+        send_cmd(ADDR_OP, OP_SUB);
+        #(RESP_WAIT);
+        check_value(dut.alu_enable, 1'b1, "Caso 11h (ALU habilitada con fuentes mezcladas)");
+        check_rx(base, 2, {8'h0A, 8'h00, 16'h0}, "Caso 11i (0x0F - 0x05 = 0x0A, A por switch + B/Op por UART)");
+
+        // ---------------------------------------------------------------------
+        // CASO 12: El switch pisa un valor que B tenia cargado por UART --
+        // confirma que el mux de datos toma 'sw' y no el 'r_data' viejo.
+        // -------------------------------------------------------------------
+        base = rx_count;
+        sw = 8'h0A;
+        press_clean(BTN_B, 25);
+        #(RESP_WAIT);
+        check_value(dut.reg_b_out, 8'h0A, "Caso 12a (B recargado por switch, pisa el valor de UART)");
+        check_rx(base, 2, {8'h05, 8'h00, 16'h0}, "Caso 12b (0x0F - 0x0A = 0x05)");
 
         // ---------------------------------------------------------------------
         // RESUMEN FINAL

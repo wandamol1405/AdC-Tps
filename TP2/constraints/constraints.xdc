@@ -1,4 +1,4 @@
-## Constraints del TP2 (top.v): ALU manejada solo por UART, placa Basys3
+## Constraints del TP2 (top.v): ALU manejada por UART y por switches/botones (TP1), placa Basys3
 
 ## Clock 100 MHz
 set_property -dict { PACKAGE_PIN W5 IOSTANDARD LVCMOS33 } [get_ports { clk }];
@@ -11,6 +11,21 @@ set_property -dict { PACKAGE_PIN U17 IOSTANDARD LVCMOS33 } [get_ports { reset }]
 ## rx: entra desde la PC (RsRx) · tx: sale hacia la PC (RsTx)
 set_property -dict { PACKAGE_PIN B18 IOSTANDARD LVCMOS33 } [get_ports { rx }];
 set_property -dict { PACKAGE_PIN A18 IOSTANDARD LVCMOS33 } [get_ports { tx }];
+
+## Switches SW0-SW7: dato (A/B) u opcode, igual que en el TP1
+set_property -dict { PACKAGE_PIN V17 IOSTANDARD LVCMOS33 } [get_ports { sw[0] }];
+set_property -dict { PACKAGE_PIN V16 IOSTANDARD LVCMOS33 } [get_ports { sw[1] }];
+set_property -dict { PACKAGE_PIN W16 IOSTANDARD LVCMOS33 } [get_ports { sw[2] }];
+set_property -dict { PACKAGE_PIN W17 IOSTANDARD LVCMOS33 } [get_ports { sw[3] }];
+set_property -dict { PACKAGE_PIN W15 IOSTANDARD LVCMOS33 } [get_ports { sw[4] }];
+set_property -dict { PACKAGE_PIN V15 IOSTANDARD LVCMOS33 } [get_ports { sw[5] }];
+set_property -dict { PACKAGE_PIN W14 IOSTANDARD LVCMOS33 } [get_ports { sw[6] }];
+set_property -dict { PACKAGE_PIN W13 IOSTANDARD LVCMOS33 } [get_ports { sw[7] }];
+
+## Botones de carga por switch: btnL = A, btnC = B, btnR = Op (igual que en el TP1)
+set_property -dict { PACKAGE_PIN W19 IOSTANDARD LVCMOS33 } [get_ports { btnL }];
+set_property -dict { PACKAGE_PIN U18 IOSTANDARD LVCMOS33 } [get_ports { btnC }];
+set_property -dict { PACKAGE_PIN T17 IOSTANDARD LVCMOS33 } [get_ports { btnR }];
 
 ## LEDs LD0-LD7: resultado de la ALU
 set_property -dict { PACKAGE_PIN U16 IOSTANDARD LVCMOS33 } [get_ports { led[0] }];
