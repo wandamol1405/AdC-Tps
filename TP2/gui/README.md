@@ -15,7 +15,7 @@ cd TP2/gui
 python3 app.py
 ```
 
-En el combo de **Puerto** aparece siempre la opción **"Mock (sin hardware)"**, además de los puertos serie reales detectados (p. ej. `/dev/ttyUSB0`). Mientras el wiring final (`TP2/README.md`, sección "Pendiente", ítem 5) no esté programado en la Basys3, usar el mock para probar la GUI y el protocolo de punta a punta.
+En el combo de **Puerto** aparece siempre la opción **"Mock (sin hardware)"**, además de los puertos serie reales detectados (p. ej. `/dev/ttyUSB0`). Con la Basys3 programada y conectada por USB, elegir su puerto (`/dev/ttyUSBx`); sin placa, usar el mock para probar la GUI y el protocolo de punta a punta.
 
 ## Estructura
 
