@@ -1,0 +1,10 @@
+.runs/
+.cache/
+.sim/
+.Xil/
+.hw/
+.ip_user_files/
+*.jou
+*.log
+*.bit
+__pycache__/
